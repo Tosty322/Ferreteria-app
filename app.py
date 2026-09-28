@@ -1,11 +1,14 @@
 from datetime import datetime
 import pandas as pd
 import streamlit as st
+from sqlalchemy import create_engine
 
 
 # --- CONEXIÓN A SUPABASE ---
 def conectar_db():
-  return st.connection("postgresql", type="sql")
+  # Lee la URL directamente de los Secrets de Streamlit de forma segura
+  db_url = st.secrets["connections"]["postgresql"]["url"]
+  return create_engine(db_url)
 
 
 # --- CONFIGURACIÓN DE LA PÁGINA ---
