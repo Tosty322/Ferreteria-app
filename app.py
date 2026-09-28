@@ -5,7 +5,12 @@ import streamlit as st
 
 # --- CONEXIÓN A SUPABASE ---
 def conectar_db():
-  return st.connection("postgresql", type="sql")
+  return st.connection(
+      "postgresql",
+      type="sql",
+      autocommit=True,
+      ttl=0,
+  )
 
 
 # --- CONFIGURACIÓN DE LA PÁGINA ---
