@@ -1,7 +1,7 @@
 from datetime import datetime
 import pandas as pd
 import streamlit as st
-from sqlalchemy import create_engine, text  # <--- 1. Importamos 'text' aquí
+from sqlalchemy import create_engine, text  # <--- Importamos 'text' de SQLAlchemy
 
 
 # --- CONEXIÓN A SUPABASE ---
@@ -27,6 +27,7 @@ menu = st.sidebar.selectbox(
         "Historial de Precios",
         "Registrar Venta (POS)",
         "Historial de Ventas",
+        "Eliminar Producto",  # <--- NUEVA OPCIÓN EN EL MENÚ
     ],
 )
 
@@ -119,7 +120,6 @@ elif menu == "Registrar Producto":
                 try:
                     conn = conectar_db()
                     with conn.session as s:
-                        # 2. Envolvemos el SQL con text()
                         s.execute(
                             text("""
                                 INSERT INTO productos (codigo_interno, nombre, categoria, unidad_medida, stock, precio_venta, precio_compra)
@@ -236,7 +236,6 @@ elif menu == "Registrar Compra / Reposición":
                     costo_total_compra = cantidad_a_comprar * nuevo_precio_compra
 
                     with conn.session as s:
-                        # 3. Envolvemos con text()
                         s.execute(
                             text("""
                                 INSERT INTO compras (producto_id, cantidad, precio_compra_anterior, precio_compra_nuevo, precio_venta_anterior, precio_venta_nuevo, costo_total, fecha_hora)
@@ -369,7 +368,6 @@ elif menu == "Actualizar Precios":
                 if nuevo_precio != precio_actual:
                     fecha_ahora = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                     with conn.session as s:
-                        # 4. Envolvemos con text()
                         s.execute(
                             text("""
                                 INSERT INTO historial_precios (producto_id, precio_anterior, precio_nuevo, fecha_cambio)
@@ -549,7 +547,6 @@ elif menu == "Registrar Venta (POS)":
                         fecha_venta = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
                         with conn.session as s:
-                            # 5. Envolvemos con text()
                             res = s.execute(
                                 text("""
                                     INSERT INTO ventas (fecha_hora, total, metodo_pago, monto_yape, monto_efectivo)
@@ -663,3 +660,90 @@ elif menu == "Historial de Ventas":
             ),
             mime="text/csv",
         )
+
+# -------------------------------------------------------------
+# 9. ELIMINAR PRODUCTO (NUEVA SECCIÓN)
+# -------------------------------------------------------------
+elif menu == "Eliminar Producto":
+    st.header("🗑️ Eliminar Producto del Inventario")
+    st.warning(
+        "⚠️ **Precaución:** Si el producto ya tiene compras o ventas asociadas en"
+        " el historial, es posible que Supabase rechace la eliminación para"
+        " proteger la integridad de los datos. En ese caso, se recomienda editar"
+        " su nombre o dejar su stock en 0."
+    )
+
+    conn = conectar_db()
+    busqueda_del = st.text_input(
+        "🔍 Escribe para buscar el producto que deseas eliminar (por nombre o"
+        " código):"
+    )
+
+    if busqueda_del:
+        query_del = f"SELECT id, codigo_interno, nombre, stock, precio_venta, unidad_medida FROM productos WHERE nombre ILIKE '%{busqueda_del}%' OR codigo_interno ILIKE '%{busqueda_del}%'"
+    else:
+        query_del = (
+            "SELECT id, codigo_interno, nombre, stock, precio_venta, unidad_medida"
+            " FROM productos"
+        )
+
+    df_prod_del = conn.query(query_del, ttl=0)
+
+    if df_prod_del.empty:
+        st.info("No se encontró ningún producto.")
+    else:
+        df_prod_del["opcion_eliminar"] = (
+            df_prod_del["nombre"]
+            + " [Código: "
+            + df_prod_del["codigo_interno"]
+            + "] - Stock: "
+            + df_prod_del["stock"].astype(str)
+        )
+
+        prod_a_eliminar = st.selectbox(
+            "Selecciona el producto a eliminar:",
+            df_prod_del["opcion_eliminar"],
+        )
+
+        if prod_a_eliminar:
+            idx_d = df_prod_del[
+                df_prod_del["opcion_eliminar"] == prod_a_eliminar
+            ].index[0]
+            id_producto_borrar = df_prod_del.loc[idx_d, "id"]
+            nombre_producto_borrar = df_prod_del.loc[idx_d, "nombre"]
+
+            # Casilla de confirmación para evitar accidentes
+            confirmar_check = st.checkbox(
+                f"Confirmo que deseo eliminar permanentemente el producto:"
+                f" '{nombre_producto_borrar}'"
+            )
+
+            if st.button(
+                "❌ Eliminar Producto Definitivamente", type="primary"
+            ):
+                if confirmar_check:
+                    try:
+                        with conn.session as s:
+                            s.execute(
+                                text(
+                                    "DELETE FROM productos WHERE id = :p_id"
+                                ),
+                                dict(p_id=int(id_producto_borrar)),
+                            )
+                            s.commit()
+                        st.success(
+                            f"✅ El producto '{nombre_producto_borrar}' ha sido"
+                            " eliminado correctamente."
+                        )
+                        st.rerun()
+                    except Exception as e:
+                        st.error(
+                            "❌ No se pudo eliminar el producto porque tiene"
+                            " registros en el historial de compras o ventas."
+                            f" Detalle del error: {e}"
+                        )
+                else:
+                    st.warning(
+                        "Por favor, marca la casilla de confirmación antes de"
+                        " proceder con la eliminación."
+                    )
