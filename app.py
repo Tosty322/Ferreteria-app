@@ -6,9 +6,8 @@ from sqlalchemy import create_engine
 
 # --- CONEXIÓN A SUPABASE ---
 def conectar_db():
-  # Lee la URL directamente de los Secrets de Streamlit de forma segura
-  db_url = st.secrets["connections"]["postgresql"]["url"]
-  return create_engine(db_url)
+  # Esto crea una conexión compatible con el método .query() de Streamlit
+  return st.connection("postgresql", type="sql")
 
 
 # --- CONFIGURACIÓN DE LA PÁGINA ---
