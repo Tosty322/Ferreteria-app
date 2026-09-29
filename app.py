@@ -21,13 +21,15 @@ menu = st.sidebar.selectbox(
     [
         "Inventario Actual",
         "Registrar Producto",
+        "Modificar Datos del Producto",
+        "Productos Faltantes",  # <--- NUEVO APARTADO EN EL MENÚ
         "Registrar Compra / Reposición",
         "Historial de Compras",
         "Actualizar Precios",
         "Historial de Precios",
         "Registrar Venta (POS)",
         "Historial de Ventas",
-        "Eliminar Producto",  # <--- NUEVA OPCIÓN EN EL MENÚ
+        "Eliminar Producto",
     ],
 )
 
@@ -146,7 +148,251 @@ elif menu == "Registrar Producto":
                 st.warning("Completa al menos el código y el nombre.")
 
 # -------------------------------------------------------------
-# 3. REGISTRAR COMPRA / REPOSICIÓN
+# 3. MODIFICAR DATOS DEL PRODUCTO
+# -------------------------------------------------------------
+elif menu == "Modificar Datos del Producto":
+    st.header("✏️ Modificar Nombre, Código o Categoría de Producto")
+    conn = conectar_db()
+
+    busqueda_edit = st.text_input(
+        "🔍 Escribe para buscar el producto que deseas corregir (por nombre o"
+        " código):"
+    )
+
+    if busqueda_edit:
+        query_edit = f"SELECT id, codigo_interno, nombre, categoria, unidad_medida FROM productos WHERE nombre ILIKE '%{busqueda_edit}%' OR codigo_interno ILIKE '%{busqueda_edit}%'"
+    else:
+        query_edit = (
+            "SELECT id, codigo_interno, nombre, categoria, unidad_medida FROM"
+            " productos"
+        )
+
+    df_prod_edit = conn.query(query_edit, ttl=0)
+
+    if df_prod_edit.empty:
+        st.info("No se encontró ningún producto.")
+    else:
+        df_prod_edit["opcion_modificar"] = (
+            df_prod_edit["nombre"]
+            + " [Código actual: "
+            + df_prod_edit["codigo_interno"]
+            + "]"
+        )
+
+        prod_seleccionado_edit = st.selectbox(
+            "Selecciona el producto a editar:",
+            df_prod_edit["opcion_modificar"],
+        )
+
+        if prod_seleccionado_edit:
+            idx_e = df_prod_edit[
+                df_prod_edit["opcion_modificar"] == prod_seleccionado_edit
+            ].index[0]
+            id_prod = df_prod_edit.loc[idx_e, "id"]
+            cod_actual = df_prod_edit.loc[idx_e, "codigo_interno"]
+            nom_actual = df_prod_edit.loc[idx_e, "nombre"]
+            cat_actual = df_prod_edit.loc[idx_e, "categoria"]
+            uni_actual = df_prod_edit.loc[idx_e, "unidad_medida"]
+
+            categorias_disponibles = [
+                "Gasfitería",
+                "Electricidad",
+                "Construcción",
+                "Herramientas",
+                "Pinturas",
+                "Plásticos",
+                "Limpieza",
+                "Iluminación",
+                "Otros",
+            ]
+            try:
+                cat_index = categorias_disponibles.index(cat_actual)
+            except ValueError:
+                cat_index = 0
+
+            unidades_disponibles = [
+                "Unidad",
+                "Docena",
+                "Metro",
+                "Kilo",
+                "Litro",
+                "Caja",
+            ]
+            try:
+                uni_index = unidades_disponibles.index(uni_actual)
+            except ValueError:
+                uni_index = 0
+
+            with st.form("form_editar_datos"):
+                st.write(
+                    "📝 **Modifica los campos necesarios y guarda los cambios:**"
+                )
+                nuevo_codigo = st.text_input("Código Interno", value=cod_actual)
+                nuevo_nombre = st.text_input(
+                    "Nombre del Producto", value=nom_actual
+                )
+                nueva_categoria = st.selectbox(
+                    "Categoría",
+                    categorias_disponibles,
+                    index=cat_index,
+                )
+                nueva_unidad = st.selectbox(
+                    "Unidad de Medida",
+                    unidades_disponibles,
+                    index=uni_index,
+                )
+
+                btn_actualizar_datos = st.form_submit_button(
+                    "💾 Guardar Cambios"
+                )
+
+                if btn_actualizar_datos:
+                    if nuevo_codigo and nuevo_nombre:
+                        try:
+                            with conn.session as s:
+                                s.execute(
+                                    text("""
+                                        UPDATE productos 
+                                        SET codigo_interno = :nc, nombre = :nn, categoria = :ncat, unidad_medida = :nu
+                                        WHERE id = :p_id
+                                    """),
+                                    dict(
+                                        nc=nuevo_codigo,
+                                        nn=nuevo_nombre,
+                                        ncat=nueva_categoria,
+                                        nu=nueva_unidad,
+                                        p_id=int(id_prod),
+                                    ),
+                                )
+                                s.commit()
+                            st.success(
+                                "✅ ¡Los datos del producto se actualizaron"
+                                " correctamente!"
+                            )
+                            st.rerun()
+                        except Exception as e:
+                            st.error(
+                                f"❌ Error al actualizar (es posible que el nuevo código '{nuevo_codigo}' ya le pertenezca a otro producto): {e}"
+                            )
+                    else:
+                        st.warning(
+                            "El código y el nombre no pueden estar vacíos."
+                        )
+
+# -------------------------------------------------------------
+# 4. PRODUCTOS FALTANTES (NUEVO APARTADO)
+# -------------------------------------------------------------
+elif menu == "Productos Faltantes":
+    st.header("📝 Apuntar y Gestionar Productos Faltantes")
+
+    conn = conectar_db()
+
+    # Formulario para registrar un faltante
+    with st.form("form_faltante"):
+        st.subheader("➕ Anotar nuevo producto que falta")
+        col_f1, col_f2 = st.columns(2)
+        with col_f1:
+            nombre_faltante = st.text_input(
+                "Nombre del producto o material que falta"
+            )
+            cantidad_sug = st.text_input(
+                "Cantidad aproximada / Observación (Ej: 5 unidades, 2 rollos)"
+            )
+        with col_f2:
+            persona_apunto = st.text_input(
+                "Tu nombre (¿Quién anota este faltante?)"
+            )
+            motivo_falta = st.text_input("Motivo (Ej: Se agotó, cliente pidió más)")
+
+        btn_guardar_faltante = st.form_submit_button(
+            "📌 Guardar en la Lista de Faltantes"
+        )
+
+        if btn_guardar_faltante:
+            if nombre_faltante and persona_apunto:
+                try:
+                    fecha_ahora = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                    with conn.session as s:
+                        s.execute(
+                            text("""
+                                INSERT INTO productos_faltantes (nombre_producto, cantidad_sugerida, motivo, apuntado_por, fecha_hora)
+                                VALUES (:nom, :cant, :mot, :per, :f_h)
+                            """),
+                            dict(
+                                nom=nombre_faltante,
+                                cant=cantidad_sug,
+                                mot=motivo_falta,
+                                per=persona_apunto,
+                                f_h=fecha_ahora,
+                            ),
+                        )
+                        s.commit()
+                    st.success(
+                        f"✅ '{nombre_faltante}' fue agregado a la lista de"
+                        " faltantes correctamente."
+                    )
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"❌ Error al guardar el producto faltante: {e}")
+            else:
+                st.warning(
+                    "⚠️ Por favor, completa al menos el 'Nombre del producto'"
+                    " y 'Tu nombre'."
+                )
+
+    st.divider()
+
+    # Visualización de la lista de faltantes
+    st.subheader("📋 Lista Actual de Productos Faltantes")
+    df_faltantes = conn.query(
+        "SELECT * FROM productos_faltantes ORDER BY fecha_hora DESC", ttl=0
+    )
+
+    if df_faltantes.empty:
+        st.info("🎉 ¡Excelente noticia! No hay ningún producto faltante anotado.")
+    else:
+        st.dataframe(df_faltantes, use_container_width=True)
+
+        st.markdown("---")
+        st.subheader("🗑️ Marcar como Solucionado / Eliminar Faltante")
+        df_faltantes["opcion_eliminar_faltante"] = (
+            "["
+            + df_faltantes["fecha_hora"].astype(str)
+            + "] "
+            + df_faltantes["nombre_producto"]
+            + " (Apuntado por: "
+            + df_faltantes["apuntado_por"]
+            + ")"
+        )
+
+        faltante_a_borrar = st.selectbox(
+            "Selecciona el faltante que ya compraste o deseas quitar de la lista:",
+            df_faltantes["opcion_eliminar_faltante"],
+        )
+
+        if st.button("❌ Eliminar de la lista de faltantes"):
+            idx_f = df_faltantes[
+                df_faltantes["opcion_eliminar_faltante"] == faltante_a_borrar
+            ].index[0]
+            id_f_borrar = df_faltantes.loc[idx_f, "id"]
+
+            try:
+                with conn.session as s:
+                    s.execute(
+                        text("DELETE FROM productos_faltantes WHERE id = :f_id"),
+                        dict(f_id=int(id_f_borrar)),
+                    )
+                    s.commit()
+                st.success(
+                    "✅ El producto fue eliminado de la lista de faltantes con"
+                    " éxito."
+                )
+                st.rerun()
+            except Exception as e:
+                st.error(f"❌ Error al eliminar el registro: {e}")
+
+# -------------------------------------------------------------
+# 5. REGISTRAR COMPRA / REPOSICIÓN
 # -------------------------------------------------------------
 elif menu == "Registrar Compra / Reposición":
     st.header("📥 Registrar Compra (Aumentar Stock y Actualizar Costos)")
@@ -289,7 +535,7 @@ elif menu == "Registrar Compra / Reposición":
                     st.rerun()
 
 # -------------------------------------------------------------
-# 4. HISTORIAL DE COMPRAS
+# 6. HISTORIAL DE COMPRAS
 # -------------------------------------------------------------
 elif menu == "Historial de Compras":
     st.header("📋 Historial de Compras y Reposiciones")
@@ -329,7 +575,7 @@ elif menu == "Historial de Compras":
         )
 
 # -------------------------------------------------------------
-# 5. ACTUALIZAR PRECIOS
+# 7. ACTUALIZAR PRECIOS
 # -------------------------------------------------------------
 elif menu == "Actualizar Precios":
     st.header("🔄 Actualizar Precios Independiente")
@@ -393,7 +639,7 @@ elif menu == "Actualizar Precios":
                     st.info("El nuevo precio es idéntico al actual.")
 
 # -------------------------------------------------------------
-# 6. HISTORIAL DE PRECIOS
+# 8. HISTORIAL DE PRECIOS
 # -------------------------------------------------------------
 elif menu == "Historial de Precios":
     st.header("📈 Historial de Cambios de Precios")
@@ -412,7 +658,7 @@ elif menu == "Historial de Precios":
         st.dataframe(df_historial, use_container_width=True)
 
 # -------------------------------------------------------------
-# 7. REGISTRAR VENTA (POS)
+# 9. REGISTRAR VENTA (POS)
 # -------------------------------------------------------------
 elif menu == "Registrar Venta (POS)":
     st.header("🛒 Caja / Punto de Venta")
@@ -616,7 +862,7 @@ elif menu == "Registrar Venta (POS)":
                     st.rerun()
 
 # -------------------------------------------------------------
-# 8. HISTORIAL DE VENTAS
+# 10. HISTORIAL DE VENTAS
 # -------------------------------------------------------------
 elif menu == "Historial de Ventas":
     st.header("📊 Historial de Ventas y Boletas Detallado")
@@ -662,7 +908,7 @@ elif menu == "Historial de Ventas":
         )
 
 # -------------------------------------------------------------
-# 9. ELIMINAR PRODUCTO (NUEVA SECCIÓN)
+# 11. ELIMINAR PRODUCTO
 # -------------------------------------------------------------
 elif menu == "Eliminar Producto":
     st.header("🗑️ Eliminar Producto del Inventario")
@@ -712,7 +958,6 @@ elif menu == "Eliminar Producto":
             id_producto_borrar = df_prod_del.loc[idx_d, "id"]
             nombre_producto_borrar = df_prod_del.loc[idx_d, "nombre"]
 
-            # Casilla de confirmación para evitar accidentes
             confirmar_check = st.checkbox(
                 f"Confirmo que deseo eliminar permanentemente el producto:"
                 f" '{nombre_producto_borrar}'"
