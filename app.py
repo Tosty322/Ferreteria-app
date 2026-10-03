@@ -417,28 +417,16 @@ elif menu == "Corte de Caja y Balance":
     
     fecha_str = fecha_corte.strftime("%Y-%m-%d")
     
-    # 1. Consultar ventas de esa fecha
-    query_ventas_dia = f"""
-        SELECT COALESCE(SUM(monto_efectivo), 0) AS ing_efectivo,
-               COALESCE(SUM(monto_yape), 0) AS ing_yape,
-               COALESCE(SUM(total), 0) AS total_ventas
-        FROM ventas 
-        WHERE DATE(fecha_hora) = '{fecha_str}'
-    """
-    df_v_dia = conn.query(query_ventas_dia, ttl=0)
-    ing_efectivo = df_v_dia.loc[0, "ing_efectivo"] if not df_v_dia.empty else 0.0
-    ing_yape = df_v_dia.loc[0, "ing_yape"] if not df_v_dia.empty else 0.0
+    # Métricas del día seleccionado
+    query_m_v = f"SELECT COALESCE(SUM(monto_efectivo), 0) AS ie, COALESCE(SUM(monto_yape), 0) AS iy FROM ventas WHERE DATE(fecha_hora) = '{fecha_str}'"
+    df_mv = conn.query(query_m_v, ttl=0)
+    ing_efectivo = df_mv.loc[0, "ie"]
+    ing_yape = df_mv.loc[0, "iy"]
 
-    # 2. Consultar gastos de esa fecha según método de pago
-    query_gastos_dia = f"""
-        SELECT COALESCE(SUM(CASE WHEN metodo_pago = 'Efectivo' THEN monto ELSE 0 END), 0) AS gast_efectivo,
-               COALESCE(SUM(CASE WHEN metodo_pago = 'Yape / Plin' THEN monto ELSE 0 END), 0) AS gast_yape
-        FROM gastos 
-        WHERE DATE(fecha_hora) = '{fecha_str}'
-    """
-    df_g_dia = conn.query(query_gastos_dia, ttl=0)
-    gast_efectivo = df_g_dia.loc[0, "gast_efectivo"] if not df_g_dia.empty else 0.0
-    gast_yape = df_g_dia.loc[0, "gast_yape"] if not df_g_dia.empty else 0.0
+    query_m_g = f"SELECT COALESCE(SUM(CASE WHEN metodo_pago = 'Efectivo' THEN monto ELSE 0 END), 0) AS ge, COALESCE(SUM(CASE WHEN metodo_pago = 'Yape / Plin' THEN monto ELSE 0 END), 0) AS gy FROM gastos WHERE DATE(fecha_hora) = '{fecha_str}'"
+    df_mg = conn.query(query_m_g, ttl=0)
+    gast_efectivo = df_mg.loc[0, "ge"]
+    gast_yape = df_mg.loc[0, "gy"]
 
     st.subheader(f"📊 Resumen del día: {fecha_str}")
     
@@ -454,7 +442,7 @@ elif menu == "Corte de Caja y Balance":
 
     st.divider()
 
-    # Cálculo claro de la diferencia (Ingresos - Gastos)
+    # Diferencia (Ingresos - Gastos)
     dif_efectivo = ing_efectivo - gast_efectivo
     dif_yape = ing_yape - gast_yape
 
@@ -462,6 +450,40 @@ elif menu == "Corte de Caja y Balance":
     col_d1, col_d2 = st.columns(2)
     col_d1.metric("Neto en Efectivo (Ingresos - Gastos)", f"S/ {dif_efectivo:,.5f}")
     col_d2.metric("Neto en Yape / Plin (Ingresos - Gastos)", f"S/ {dif_yape:,.5f}")
+
+    st.divider()
+
+    # HISTORIAL COMPLETO PARA DESCARGA CSV (Ingresos y Gastos combinados de todos los tiempos)
+    query_v_hist = """
+        SELECT fecha_hora, 'INGRESO (Venta)' AS tipo, metodo_pago, total AS monto, 
+               CONCAT('Efectivo: S/ ', monto_efectivo, ' | Yape/Plin: S/ ', monto_yape) AS detalle
+        FROM ventas 
+    """
+    df_v_hist = conn.query(query_v_hist, ttl=0)
+
+    query_g_hist = """
+        SELECT fecha_hora, CONCAT('GASTO (', categoria, ')') AS tipo, metodo_pago, monto, 
+               COALESCE(anotacion, '') AS detalle
+        FROM gastos 
+    """
+    df_g_hist = conn.query(query_g_hist, ttl=0)
+
+    df_historial_combinado = pd.concat([df_v_hist, df_g_hist], ignore_index=True)
+    if not df_historial_combinado.empty:
+        df_historial_combinado["fecha_hora"] = pd.to_datetime(df_historial_combinado["fecha_hora"])
+        df_historial_combinado = df_historial_combinado.sort_values(by="fecha_hora", ascending=False)
+
+    st.subheader("📥 Descargar Historial Completo")
+    if not df_historial_combinado.empty:
+        csv_historico = df_historial_combinado.to_csv(index=False).encode("utf-8")
+        st.download_button(
+            label="📥 Descargar Histórico Completo de Ingresos y Gastos (CSV)",
+            data=csv_historico,
+            file_name=f"historico_ingresos_y_gastos_{datetime.now().strftime('%Y-%m-%d')}.csv",
+            mime="text/csv",
+        )
+    else:
+        st.info("No hay registros históricos para descargar.")
 
     st.divider()
 
@@ -762,7 +784,7 @@ elif menu == "Historial de Ventas":
 # 14. ELIMINAR PRODUCTO
 # -------------------------------------------------------------
 elif menu == "Eliminar Producto":
-    st.header("🗑️ Eliminar Producto del Inventario")
+    st.header("🗑️️ Eliminar Producto del Inventario")
     st.warning("⚠️ **Precaución:** Se recomienda pasar a stock 0 en lugar de eliminar si tiene historial.")
     conn = conectar_db()
     busqueda_del = st.text_input("🔍 Escribe para buscar el producto que deseas eliminar (por nombre o código):")
