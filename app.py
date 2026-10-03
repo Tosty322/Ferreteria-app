@@ -76,6 +76,10 @@ if menu == "Inventario Actual":
     conn = conectar_db()
     st.header("📦 Inventario Actual y Stock Total")
     
+    # Obtener lista de proveedores para el filtro
+    df_prov_inv = conn.query("SELECT id, nombre FROM proveedores", ttl=0)
+    proveedores_filtro_dict = dict(zip(df_prov_inv["nombre"], df_prov_inv["id"])) if not df_prov_inv.empty else {}
+    
     query_inv_total = "SELECT p.stock, p.precio_compra, p.precio_venta FROM productos p"
     df_todos = conn.query(query_inv_total, ttl=0)
     
@@ -90,7 +94,15 @@ if menu == "Inventario Actual":
         col_m3.metric("Valor Inventario (Costo)", f"S/ {valor_inventario_compra:,.5f}")
     
     st.divider()
-    cat_filtro_inv = st.selectbox("📂 Filtrar inventario por categoría:", ["Todas las Categorías"] + CATEGORIAS_DISPONIBLES, key="filtro_inv")
+    
+    # Filtros avanzados de categoría y proveedor
+    col_f1, col_f2 = st.columns(2)
+    with col_f1:
+        cat_filtro_inv = st.selectbox("📂 Filtrar por categoría:", ["Todas las Categorías"] + CATEGORIAS_DISPONIBLES, key="filtro_inv")
+    with col_f2:
+        lista_prov_nombres = ["Todos los Proveedores"] + list(proveedores_filtro_dict.keys())
+        prov_filtro_inv = st.selectbox("🤝 Filtrar por proveedor:", lista_prov_nombres, key="filtro_prov_inv")
+        
     busqueda_inv = st.text_input("🔍 Buscar producto por nombre o código en el inventario:")
     
     query = """
@@ -102,6 +114,10 @@ if menu == "Inventario Actual":
     """
     if cat_filtro_inv != "Todas las Categorías":
         query += f" AND p.categoria = '{cat_filtro_inv}'"
+    if prov_filtro_inv != "Todos los Proveedores":
+        prov_id_sel = proveedores_filtro_dict.get(prov_filtro_inv)
+        if prov_id_sel:
+            query += f" AND p.proveedor_id = {prov_id_sel}"
     if busqueda_inv:
         query += f" AND (p.nombre ILIKE '%{busqueda_inv}%' OR p.codigo_interno ILIKE '%{busqueda_inv}%')"
         
@@ -707,7 +723,6 @@ elif menu == "Registrar Venta (POS)":
             p_stock = df_productos.loc[idx_sel, "stock"]
             p_precio = df_productos.loc[idx_sel, "precio_venta"]
             
-            # ADVERTENCIA INFORMATIVA SI EL STOCK ES 0 O INSUFICIENTE, PERO PERMITIENDO LA VENTA
             if cantidad_vender > p_stock:
                 st.warning(f"⚠️ Stock insuficiente ({p_stock:,.5f} {unidad_sel} disponibles). Se agregará al carrito y el stock quedará en 0.")
             
@@ -766,7 +781,6 @@ elif menu == "Registrar Venta (POS)":
                                     """),
                                     dict(v_id=int(venta_id), p_id=int(item["id"]), cant=float(item["cantidad"]), p_u=float(precio_unitario_proporcional), sub=float(subtotal_proporcional)),
                                 )
-                                # LÓGICA MODIFICADA: Si el stock actual es menor a lo vendido, lo fija en 0 en vez de dejarlo negativo
                                 s.execute(text("""
                                     UPDATE productos 
                                     SET stock = CASE 
