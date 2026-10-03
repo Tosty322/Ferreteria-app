@@ -11,10 +11,17 @@ def conectar_db():
 st.set_page_config(page_title="Ferretería Sincronizada", layout="wide")
 st.title("🛠️ Sistema de Control y Ventas - Ferretería")
 
-# Lista global de categorías disponibles
+# Listas globales de categorías
 CATEGORIAS_DISPONIBLES = [
     "Gasfitería", "Electricidad", "Construcción", "Herramientas",
     "Pinturas", "Plásticos", "Limpieza", "Iluminación", "Otros",
+]
+
+CATEGORIAS_GASTOS = [
+    "Comida y bebida",
+    "Compras para el local",
+    "Luis",
+    "Percy",
 ]
 
 st.sidebar.title("Menú de Navegación")
@@ -26,6 +33,7 @@ menu = st.sidebar.selectbox(
         "Registrar Producto",
         "Modificar Datos del Producto",
         "Productos Faltantes",
+        "Control de Gastos",  # <--- NUEVO APARTADO
         "Registrar Compra / Reposición",
         "Historial de Compras",
         "Actualizar Precios",
@@ -37,7 +45,7 @@ menu = st.sidebar.selectbox(
 )
 
 # -------------------------------------------------------------
-# 1. INVENTARIO ACTUAL (CON FILTRO DE CATEGORÍA)
+# 1. INVENTARIO ACTUAL
 # -------------------------------------------------------------
 if menu == "Inventario Actual":
     conn = conectar_db()
@@ -57,8 +65,6 @@ if menu == "Inventario Actual":
         col_m3.metric("Valor Inventario (Costo)", f"S/ {valor_inventario_compra:,.5f}")
     
     st.divider()
-    
-    # 📂 Filtro de categoría en el inventario actual
     cat_filtro_inv = st.selectbox("📂 Filtrar inventario por categoría:", ["Todas las Categorías"] + CATEGORIAS_DISPONIBLES, key="filtro_inv")
     busqueda_inv = st.text_input("🔍 Buscar producto por nombre o código en el inventario:")
     
@@ -172,12 +178,12 @@ elif menu == "Registrar Producto":
                         s.commit()
                     st.success(f"¡Producto '{nombre}' registrado con éxito!")
                 except Exception as e:
-                    st.error(f"Error al registrar (es probable que el código '{codigo}' ya exista): {e}")
+                    st.error(f"Error al registrar: {e}")
             else:
                 st.warning("Completa al menos el código y el nombre.")
 
 # -------------------------------------------------------------
-# 4. MODIFICAR DATOS DEL PRODUCTO (CON FILTRO DE CATEGORÍA)
+# 4. MODIFICAR DATOS DEL PRODUCTO
 # -------------------------------------------------------------
 elif menu == "Modificar Datos del Producto":
     st.header("✏️ Modificar Datos, Categoría o Proveedor de Producto")
@@ -262,7 +268,7 @@ elif menu == "Modificar Datos del Producto":
                         st.warning("El código y el nombre no pueden estar vacíos.")
 
 # -------------------------------------------------------------
-# 5. PRODUCTOS FALTANTES (CON FILTRO DE CATEGORÍA)
+# 5. PRODUCTOS FALTANTES
 # -------------------------------------------------------------
 elif menu == "Productos Faltantes":
     st.header("📝 Apuntar y Gestionar Productos Faltantes")
@@ -337,7 +343,79 @@ elif menu == "Productos Faltantes":
                 st.error(f"❌ Error al eliminar el registro: {e}")
 
 # -------------------------------------------------------------
-# 6. REGISTRAR COMPRA / REPOSICIÓN
+# 6. CONTROL DE GASTOS (NUEVO APARTADO)
+# -------------------------------------------------------------
+elif menu == "Control de Gastos":
+    st.header("💸 Control y Registro de Gastos")
+    conn = conectar_db()
+    
+    with st.form("form_gasto"):
+        st.subheader("➕ Registrar Nuevo Gasto")
+        col_g1, col_g2 = st.columns(2)
+        with col_g1:
+            categoria_gasto = st.selectbox("Categoría de Gasto", CATEGORIAS_GASTOS)
+            monto_gasto = st.number_input("Monto del Gasto (S/)", min_value=0.00001, value=0.00000, step=0.00001, format="%.5f")
+        with col_g2:
+            registrado_por = st.text_input("Registrado por (Tu nombre o responsable)")
+            anotacion_gasto = st.text_area("Anotación / Detalle (Opcional)")
+            
+        btn_guardar_gasto = st.form_submit_button("💾 Guardar Gasto")
+        if btn_guardar_gasto:
+            if monto_gasto > 0 and registrado_por:
+                try:
+                    fecha_ahora = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                    with conn.session as s:
+                        s.execute(
+                            text("""
+                                INSERT INTO gastos (fecha_hora, categoria, monto, anotacion, registrado_por)
+                                VALUES (:f_h, :cat, :monto, :anot, :reg)
+                            """),
+                            dict(
+                                f_h=fecha_ahora,
+                                cat=categoria_gasto,
+                                monto=float(monto_gasto),
+                                anot=anotacion_gasto,
+                                reg=registrado_por
+                            ),
+                        )
+                        s.commit()
+                    st.success(f"✅ Gasto de S/ {monto_gasto:,.5f} registrado con éxito en '{categoria_gasto}'.")
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"❌ Error al registrar el gasto: {e}")
+            else:
+                st.warning("⚠️ Por favor, ingresa un monto mayor a 0 y indica quién registra el gasto.")
+                
+    st.divider()
+    st.subheader("📋 Historial de Gastos Registrados")
+    
+    # Filtro por categoría de gasto
+    filtro_cat_gasto = st.selectbox("📂 Filtrar gastos por categoría:", ["Todas las Categorías"] + CATEGORIAS_GASTOS, key="filtro_g")
+    
+    query_gastos = "SELECT * FROM gastos"
+    if filtro_cat_gasto != "Todas las Categorías":
+        query_gastos += f" WHERE categoria = '{filtro_cat_gasto}'"
+    query_gastos += " ORDER BY fecha_hora DESC"
+    
+    df_gastos = conn.query(query_gastos, ttl=0)
+    
+    if df_gastos.empty:
+        st.info("No hay gastos registrados todavía.")
+    else:
+        total_filtrado = df_gastos["monto"].sum()
+        st.metric("Total Gastos (según filtro)", f"S/ {total_filtrado:,.5f}")
+        st.dataframe(df_gastos, use_container_width=True)
+        
+        csv_gastos = df_gastos.to_csv(index=False).encode("utf-8")
+        st.download_button(
+            label="📥 Descargar Historial de Gastos en CSV",
+            data=csv_gastos,
+            file_name=f"historial_gastos_{datetime.now().strftime('%Y-%m-%d')}.csv",
+            mime="text/csv",
+        )
+
+# -------------------------------------------------------------
+# 7. REGISTRAR COMPRA / REPOSICIÓN
 # -------------------------------------------------------------
 elif menu == "Registrar Compra / Reposición":
     st.header("📥 Registrar Compra (Aumentar Stock y Actualizar Costos)")
@@ -405,7 +483,7 @@ elif menu == "Registrar Compra / Reposición":
                     st.rerun()
 
 # -------------------------------------------------------------
-# 7. HISTORIAL DE COMPRAS
+# 8. HISTORIAL DE COMPRAS
 # -------------------------------------------------------------
 elif menu == "Historial de Compras":
     st.header("📋 Historial de Compras y Reposiciones")
@@ -432,7 +510,7 @@ elif menu == "Historial de Compras":
         )
 
 # -------------------------------------------------------------
-# 8. ACTUALIZAR PRECIOS
+# 9. ACTUALIZAR PRECIOS
 # -------------------------------------------------------------
 elif menu == "Actualizar Precios":
     st.header("🔄 Actualizar Precios Independiente")
@@ -468,7 +546,7 @@ elif menu == "Actualizar Precios":
                     st.info("El nuevo precio es idéntico al actual.")
 
 # -------------------------------------------------------------
-# 9. HISTORIAL DE PRECIOS
+# 10. HISTORIAL DE PRECIOS
 # -------------------------------------------------------------
 elif menu == "Historial de Precios":
     st.header("📈 Historial de Cambios de Precios")
@@ -486,7 +564,7 @@ elif menu == "Historial de Precios":
         st.dataframe(df_historial, use_container_width=True)
 
 # -------------------------------------------------------------
-# 10. REGISTRAR VENTA (POS)
+# 11. REGISTRAR VENTA (POS)
 # -------------------------------------------------------------
 elif menu == "Registrar Venta (POS)":
     st.header("🛒 Caja / Punto de Venta")
@@ -525,7 +603,7 @@ elif menu == "Registrar Venta (POS)":
                 })
                 st.success(f"Agregado: {p_nombre} ({cantidad_vender:,.5f} {unidad_sel})")
         if st.session_state.carrito:
-            st.subheader("🛍️️ Productos en el Ticket Actual")
+            st.subheader("🛍️ Productos en el Ticket Actual")
             df_carrito = pd.DataFrame(st.session_state.carrito)
             st.dataframe(df_carrito[["nombre", "cantidad", "precio", "subtotal"]], use_container_width=True)
             total_original = df_carrito["subtotal"].sum()
@@ -586,7 +664,7 @@ elif menu == "Registrar Venta (POS)":
                     st.rerun()
 
 # -------------------------------------------------------------
-# 11. HISTORIAL DE VENTAS
+# 12. HISTORIAL DE VENTAS
 # -------------------------------------------------------------
 elif menu == "Historial de Ventas":
     st.header("📊 Historial de Ventas y Boletas Detallado")
@@ -615,7 +693,7 @@ elif menu == "Historial de Ventas":
         )
 
 # -------------------------------------------------------------
-# 12. ELIMINAR PRODUCTO
+# 13. ELIMINAR PRODUCTO
 # -------------------------------------------------------------
 elif menu == "Eliminar Producto":
     st.header("🗑️ Eliminar Producto del Inventario")
