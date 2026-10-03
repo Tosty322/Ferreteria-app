@@ -34,6 +34,7 @@ menu = st.sidebar.selectbox(
         "Modificar Datos del Producto",
         "Productos Faltantes",
         "Control de Gastos",
+        "Corte de Caja y Balance",  # <--- NUEVO APARTADO
         "Registrar Compra / Reposición",
         "Historial de Compras",
         "Actualizar Precios",
@@ -355,6 +356,7 @@ elif menu == "Control de Gastos":
         with col_g1:
             categoria_gasto = st.selectbox("Categoría de Gasto", CATEGORIAS_GASTOS)
             monto_gasto = st.number_input("Monto del Gasto (S/)", min_value=0.00001, value=0.00001, step=0.00001, format="%.5f")
+            metodo_pago_gasto = st.selectbox("¿Cómo se pagó este gasto?", ["Efectivo", "Yape / Plin"])
         with col_g2:
             registrado_por = st.text_input("Registrado por (Tu nombre o responsable)")
             anotacion_gasto = st.text_area("Anotación / Detalle (Opcional)")
@@ -367,28 +369,28 @@ elif menu == "Control de Gastos":
                     with conn.session as s:
                         s.execute(
                             text("""
-                                INSERT INTO gastos (fecha_hora, categoria, monto, anotacion, registrado_por)
-                                VALUES (:f_h, :cat, :monto, :anot, :reg)
+                                INSERT INTO gastos (fecha_hora, categoria, monto, anotacion, registrado_por, metodo_pago)
+                                VALUES (:f_h, :cat, :monto, :anot, :reg, :m_p)
                             """),
                             dict(
                                 f_h=fecha_ahora,
                                 cat=categoria_gasto,
                                 monto=float(monto_gasto),
                                 anot=anotacion_gasto,
-                                reg=registrado_por
+                                reg=registrado_por,
+                                m_p=metodo_pago_gasto
                             ),
                         )
                         s.commit()
-                    st.success(f"✅ Gasto de S/ {monto_gasto:,.5f} registrado con éxito en '{categoria_gasto}'.")
+                    st.success(f"✅ Gasto de S/ {monto_gasto:,.5f} pagado con {metodo_pago_gasto} registrado con éxito.")
                     st.rerun()
                 except Exception as e:
                     st.error(f"❌ Error al registrar el gasto: {e}")
             else:
-                st.warning("⚠️ Por favor, ingresa un monto mayor a 0 y indica quién registra el gasto.")
+                st.warning("⚠️ Por favor, ingresa un monto mayor a 0 y quién registra el gasto.")
                 
     st.divider()
     st.subheader("📋 Historial de Gastos Registrados")
-    
     filtro_cat_gasto = st.selectbox("📂 Filtrar gastos por categoría:", ["Todas las Categorías"] + CATEGORIAS_GASTOS, key="filtro_g")
     
     query_gastos = "SELECT * FROM gastos"
@@ -397,24 +399,84 @@ elif menu == "Control de Gastos":
     query_gastos += " ORDER BY fecha_hora DESC"
     
     df_gastos = conn.query(query_gastos, ttl=0)
-    
     if df_gastos.empty:
         st.info("No hay gastos registrados todavía.")
     else:
-        total_filtrado = df_gastos["monto"].sum()
-        st.metric("Total Gastos (según filtro)", f"S/ {total_filtrado:,.5f}")
         st.dataframe(df_gastos, use_container_width=True)
-        
-        csv_gastos = df_gastos.to_csv(index=False).encode("utf-8")
-        st.download_button(
-            label="📥 Descargar Historial de Gastos en CSV",
-            data=csv_gastos,
-            file_name=f"historial_gastos_{datetime.now().strftime('%Y-%m-%d')}.csv",
-            mime="text/csv",
-        )
 
 # -------------------------------------------------------------
-# 7. REGISTRAR COMPRA / REPOSICIÓN
+# 7. CORTE DE CAJA Y BALANCE DIARIO (NUEVO APARTADO)
+# -------------------------------------------------------------
+elif menu == "Corte de Caja y Balance":
+    st.header("💰 Corte de Caja y Balance Diario")
+    conn = conectar_db()
+    
+    # Selector de fecha para el corte (Por defecto hoy)
+    col_f1, col_f2 = st.columns(2)
+    with col_f1:
+        fecha_corte = st.date_input("📅 Selecciona la fecha para el balance:", datetime.now())
+    
+    fecha_str = fecha_corte.strftime("%Y-%m-%d")
+    
+    # 1. Consultar ventas de esa fecha
+    query_ventas_dia = f"""
+        SELECT COALESCE(SUM(monto_efectivo), 0) AS ing_efectivo,
+               COALESCE(SUM(monto_yape), 0) AS ing_yape,
+               COALESCE(SUM(total), 0) AS total_ventas
+        FROM ventas 
+        WHERE DATE(fecha_hora) = '{fecha_str}'
+    """
+    df_v_dia = conn.query(query_ventas_dia, ttl=0)
+    ing_efectivo = df_v_dia.loc[0, "ing_efectivo"] if not df_v_dia.empty else 0.0
+    ing_yape = df_v_dia.loc[0, "ing_yape"] if not df_v_dia.empty else 0.0
+
+    # 2. Consultar gastos de esa fecha según método de pago
+    query_gastos_dia = f"""
+        SELECT COALESCE(SUM(CASE WHEN metodo_pago = 'Efectivo' THEN monto ELSE 0 END), 0) AS gast_efectivo,
+               COALESCE(SUM(CASE WHEN metodo_pago = 'Yape / Plin' THEN monto ELSE 0 END), 0) AS gast_yape
+        FROM gastos 
+        WHERE DATE(fecha_hora) = '{fecha_str}'
+    """
+    df_g_dia = conn.query(query_gastos_dia, ttl=0)
+    gast_efectivo = df_g_dia.loc[0, "gast_efectivo"] if not df_g_dia.empty else 0.0
+    gast_yape = df_g_dia.loc[0, "gast_yape"] if not df_g_dia.empty else 0.0
+
+    st.subheader(f"📊 Resumen del día: {fecha_str}")
+    
+    col_r1, col_r2 = st.columns(2)
+    with col_r1:
+        st.markdown("### 📥 Ingresos")
+        st.metric("Ingresos en Efectivo", f"S/ {ing_efectivo:,.5f}")
+        st.metric("Ingresos en Yape / Plin", f"S/ {ing_yape:,.5f}")
+    with col_r2:
+        st.markdown("### 📤 Salidas / Gastos")
+        st.metric("Gastos en Efectivo", f"S/ {gast_efectivo:,.5f}")
+        st.metric("Gastos en Yape / Plin", f"S/ {gast_yape:,.5f}")
+
+    st.divider()
+
+    # Cálculo teórico en efectivo
+    efectivo_teorico = ing_efectivo - gast_efectivo
+    
+    st.subheader("💵 Balance de Efectivo en Caja")
+    st.info(f"💡 **Efectivo neto en caja (Ingresos - Gastos en efectivo):** S/ {efectivo_teorico:,.5f}")
+
+    # Definir fondo / efectivo que se deja para el día siguiente
+    efectivo_que_se_deja = st.number_input(
+        "🪙 ¿Cuánto efectivo se está dejando en caja para el día siguiente? (Fondo / Vuelto):",
+        min_value=0.00001,
+        value=0.00001,
+        step=0.00001,
+        format="%.5f"
+    )
+
+    # Cuanto debería haber para retirar / cerrar caja
+    efectivo_a_retirar_o_cerrar = efectivo_teorico - efectivo_que_se_deja
+
+    st.success(f"🔒 **Total de efectivo que DEBERÍA HABER en caja para retirar / cierre de hoy:** S/ {efectivo_a_retirar_o_cerrar:,.5f}")
+
+# -------------------------------------------------------------
+# 8. REGISTRAR COMPRA / REPOSICIÓN
 # -------------------------------------------------------------
 elif menu == "Registrar Compra / Reposición":
     st.header("📥 Registrar Compra (Aumentar Stock y Actualizar Costos)")
@@ -482,7 +544,7 @@ elif menu == "Registrar Compra / Reposición":
                     st.rerun()
 
 # -------------------------------------------------------------
-# 8. HISTORIAL DE COMPRAS
+# 9. HISTORIAL DE COMPRAS
 # -------------------------------------------------------------
 elif menu == "Historial de Compras":
     st.header("📋 Historial de Compras y Reposiciones")
@@ -509,7 +571,7 @@ elif menu == "Historial de Compras":
         )
 
 # -------------------------------------------------------------
-# 9. ACTUALIZAR PRECIOS
+# 10. ACTUALIZAR PRECIOS
 # -------------------------------------------------------------
 elif menu == "Actualizar Precios":
     st.header("🔄 Actualizar Precios Independiente")
@@ -545,7 +607,7 @@ elif menu == "Actualizar Precios":
                     st.info("El nuevo precio es idéntico al actual.")
 
 # -------------------------------------------------------------
-# 10. HISTORIAL DE PRECIOS
+# 11. HISTORIAL DE PRECIOS
 # -------------------------------------------------------------
 elif menu == "Historial de Precios":
     st.header("📈 Historial de Cambios de Precios")
@@ -563,7 +625,7 @@ elif menu == "Historial de Precios":
         st.dataframe(df_historial, use_container_width=True)
 
 # -------------------------------------------------------------
-# 11. REGISTRAR VENTA (POS)
+# 12. REGISTRAR VENTA (POS)
 # -------------------------------------------------------------
 elif menu == "Registrar Venta (POS)":
     st.header("🛒 Caja / Punto de Venta")
@@ -663,7 +725,7 @@ elif menu == "Registrar Venta (POS)":
                     st.rerun()
 
 # -------------------------------------------------------------
-# 12. HISTORIAL DE VENTAS
+# 13. HISTORIAL DE VENTAS
 # -------------------------------------------------------------
 elif menu == "Historial de Ventas":
     st.header("📊 Historial de Ventas y Boletas Detallado")
@@ -692,7 +754,7 @@ elif menu == "Historial de Ventas":
         )
 
 # -------------------------------------------------------------
-# 13. ELIMINAR PRODUCTO
+# 14. ELIMINAR PRODUCTO
 # -------------------------------------------------------------
 elif menu == "Eliminar Producto":
     st.header("🗑️ Eliminar Producto del Inventario")
