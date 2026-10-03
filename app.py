@@ -33,7 +33,7 @@ menu = st.sidebar.selectbox(
         "Registrar Producto",
         "Modificar Datos del Producto",
         "Productos Faltantes",
-        "Control de Gastos",  # <--- NUEVO APARTADO
+        "Control de Gastos",
         "Registrar Compra / Reposición",
         "Historial de Compras",
         "Actualizar Precios",
@@ -158,9 +158,9 @@ elif menu == "Registrar Producto":
 
         with col2:
             unidad = st.selectbox("Unidad de Medida", ["Unidad", "Docena", "Metro", "Kilo", "Litro", "Caja"])
-            stock = st.number_input("Stock Inicial", min_value=0.0, value=0.00000, step=0.00001, format="%.5f")
-            precio_venta = st.number_input("Precio de Venta (S/)", min_value=0.0, value=0.00000, step=0.00001, format="%.5f")
-            precio_compra = st.number_input("Precio de Compra / Costo (S/)", min_value=0.0, value=0.00000, step=0.00001, format="%.5f")
+            stock = st.number_input("Stock Inicial", min_value=0.0, value=0.00001, step=0.00001, format="%.5f")
+            precio_venta = st.number_input("Precio de Venta (S/)", min_value=0.0, value=0.00001, step=0.00001, format="%.5f")
+            precio_compra = st.number_input("Precio de Compra / Costo (S/)", min_value=0.0, value=0.00001, step=0.00001, format="%.5f")
             
         submit = st.form_submit_button("Guardar Producto")
         if submit:
@@ -343,7 +343,7 @@ elif menu == "Productos Faltantes":
                 st.error(f"❌ Error al eliminar el registro: {e}")
 
 # -------------------------------------------------------------
-# 6. CONTROL DE GASTOS (NUEVO APARTADO)
+# 6. CONTROL DE GASTOS
 # -------------------------------------------------------------
 elif menu == "Control de Gastos":
     st.header("💸 Control y Registro de Gastos")
@@ -354,7 +354,7 @@ elif menu == "Control de Gastos":
         col_g1, col_g2 = st.columns(2)
         with col_g1:
             categoria_gasto = st.selectbox("Categoría de Gasto", CATEGORIAS_GASTOS)
-            monto_gasto = st.number_input("Monto del Gasto (S/)", min_value=0.00001, value=0.00000, step=0.00001, format="%.5f")
+            monto_gasto = st.number_input("Monto del Gasto (S/)", min_value=0.00001, value=0.00001, step=0.00001, format="%.5f")
         with col_g2:
             registrado_por = st.text_input("Registrado por (Tu nombre o responsable)")
             anotacion_gasto = st.text_area("Anotación / Detalle (Opcional)")
@@ -389,7 +389,6 @@ elif menu == "Control de Gastos":
     st.divider()
     st.subheader("📋 Historial de Gastos Registrados")
     
-    # Filtro por categoría de gasto
     filtro_cat_gasto = st.selectbox("📂 Filtrar gastos por categoría:", ["Todas las Categorías"] + CATEGORIAS_GASTOS, key="filtro_g")
     
     query_gastos = "SELECT * FROM gastos"
