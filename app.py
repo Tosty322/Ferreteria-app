@@ -24,26 +24,50 @@ CATEGORIAS_GASTOS = [
     "Percy",
 ]
 
+# --- MENÚ LATERAL DIVIDIDO EN DOS BLOQUES VERTICALES ---
 st.sidebar.title("Menú de Navegación")
-menu = st.sidebar.selectbox(
-    "Seleccione una opción",
+
+st.sidebar.markdown("### 📋 Operaciones Diarias")
+menu_diarias = st.sidebar.radio(
+    "Seleccione operación diaria:",
     [
+        "Ninguna",
+        "Registrar Venta (POS)",
+        "Control de Gastos",
+        "Corte de Caja y Balance",
+        "Productos Faltantes",
+        "Historial de Ventas",
+    ],
+    label_visibility="collapsed"
+)
+
+st.sidebar.markdown("---")
+
+st.sidebar.markdown("### 📦 Gestión de Inventario y Proveedores")
+menu_gestion = st.sidebar.radio(
+    "Seleccione gestión:",
+    [
+        "Ninguna",
         "Inventario Actual",
         "Gestión de Proveedores",
         "Registrar Producto",
         "Modificar Datos del Producto",
-        "Productos Faltantes",
-        "Control de Gastos",
-        "Corte de Caja y Balance",
         "Registrar Compra / Reposición",
         "Historial de Compras",
         "Actualizar Precios",
         "Historial de Precios",
-        "Registrar Venta (POS)",
-        "Historial de Ventas",
         "Eliminar Producto",
     ],
+    label_visibility="collapsed"
 )
+
+# Definir qué menú tiene prioridad activa
+if menu_diarias != "Ninguna":
+    menu = menu_diarias
+elif menu_gestion != "Ninguna":
+    menu = menu_gestion
+else:
+    menu = "Inventario Actual" # Valor por defecto
 
 # -------------------------------------------------------------
 # 1. INVENTARIO ACTUAL
@@ -323,7 +347,7 @@ elif menu == "Productos Faltantes":
     else:
         st.dataframe(df_faltantes, use_container_width=True)
         st.markdown("---")
-        st.subheader("🗑️ Marcar como Solucionado / Eliminar Faltante")
+        st.subheader("🗑️️ Marcar como Solucionado / Eliminar Faltante")
         df_faltantes["opcion_eliminar_faltante"] = (
             "[" + df_faltantes["fecha_hora"].astype(str) + "] " + df_faltantes["nombre_producto"] + " (" + df_faltantes["categoria"].fillna("Sin categoría") + ") - Apuntado por: " + df_faltantes["apuntado_por"]
         )
@@ -453,7 +477,7 @@ elif menu == "Corte de Caja y Balance":
 
     st.divider()
 
-    # HISTORIAL COMPLETO PARA DESCARGA CSV (Ingresos y Gastos combinados de todos los tiempos)
+    # HISTORIAL COMPLETO PARA DESCARGA CSV
     query_v_hist = """
         SELECT fecha_hora, 'INGRESO (Venta)' AS tipo, metodo_pago, total AS monto, 
                CONCAT('Efectivo: S/ ', monto_efectivo, ' | Yape/Plin: S/ ', monto_yape) AS detalle
@@ -784,7 +808,7 @@ elif menu == "Historial de Ventas":
 # 14. ELIMINAR PRODUCTO
 # -------------------------------------------------------------
 elif menu == "Eliminar Producto":
-    st.header("🗑️️ Eliminar Producto del Inventario")
+    st.header("🗑️ Eliminar Producto del Inventario")
     st.warning("⚠️ **Precaución:** Se recomienda pasar a stock 0 en lugar de eliminar si tiene historial.")
     conn = conectar_db()
     busqueda_del = st.text_input("🔍 Escribe para buscar el producto que deseas eliminar (por nombre o código):")
