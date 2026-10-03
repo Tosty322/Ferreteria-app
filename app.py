@@ -11,6 +11,12 @@ def conectar_db():
 st.set_page_config(page_title="Ferretería Sincronizada", layout="wide")
 st.title("🛠️ Sistema de Control y Ventas - Ferretería")
 
+# Lista global de categorías disponibles
+CATEGORIAS_DISPONIBLES = [
+    "Gasfitería", "Electricidad", "Construcción", "Herramientas",
+    "Pinturas", "Plásticos", "Limpieza", "Iluminación", "Otros",
+]
+
 st.sidebar.title("Menú de Navegación")
 menu = st.sidebar.selectbox(
     "Seleccione una opción",
@@ -37,30 +43,21 @@ if menu == "Inventario Actual":
     conn = conectar_db()
     st.header("📦 Inventario Actual y Stock Total")
     
-    query_inv_total = """
-        SELECT p.stock, p.precio_compra, p.precio_venta 
-        FROM productos p
-    """
+    query_inv_total = "SELECT p.stock, p.precio_compra, p.precio_venta FROM productos p"
     df_todos = conn.query(query_inv_total, ttl=0)
     
     if not df_todos.empty:
         total_items = len(df_todos)
         stock_total_unidades = df_todos["stock"].sum()
-        valor_inventario_compra = (
-            df_todos["stock"] * df_todos["precio_compra"]
-        ).sum()
-        valor_inventario_venta = (
-            df_todos["stock"] * df_todos["precio_venta"]
-        ).sum()
+        valor_inventario_compra = (df_todos["stock"] * df_todos["precio_compra"]).sum()
+        valor_inventario_venta = (df_todos["stock"] * df_todos["precio_venta"]).sum()
         col_m1, col_m2, col_m3 = st.columns(3)
         col_m1.metric("Variedad de Productos", f"{total_items} ítems")
         col_m2.metric("Stock Total de Unidades", f"{stock_total_unidades:,.5f}")
         col_m3.metric("Valor Inventario (Costo)", f"S/ {valor_inventario_compra:,.5f}")
     
     st.divider()
-    busqueda_inv = st.text_input(
-        "🔍 Buscar producto por nombre o código en el inventario:"
-    )
+    busqueda_inv = st.text_input("🔍 Buscar producto por nombre o código en el inventario:")
     
     query = """
         SELECT p.id, p.codigo_interno, p.nombre, p.categoria, p.unidad_medida, 
@@ -104,12 +101,7 @@ elif menu == "Gestión de Proveedores":
                                 INSERT INTO proveedores (nombre, contacto, telefono, direccion)
                                 VALUES (:nombre, :contacto, :telefono, :direccion)
                             """),
-                            dict(
-                                nombre=nombre_prov,
-                                contacto=contacto_prov,
-                                telefono=telefono_prov,
-                                direccion=direccion_prov
-                            ),
+                            dict(nombre=nombre_prov, contacto=contacto_prov, telefono=telefono_prov, direccion=direccion_prov),
                         )
                         s.commit()
                     st.success(f"¡Proveedor '{nombre_prov}' registrado con éxito!")
@@ -128,7 +120,7 @@ elif menu == "Gestión de Proveedores":
         st.dataframe(df_proveedores, use_container_width=True)
 
 # -------------------------------------------------------------
-# 3. REGISTRAR PRODUCTO (Actualizado a 5 decimales)
+# 3. REGISTRAR PRODUCTO
 # -------------------------------------------------------------
 elif menu == "Registrar Producto":
     st.header("➕ Registrar Nuevo Producto")
@@ -144,13 +136,7 @@ elif menu == "Registrar Producto":
         with col1:
             codigo = st.text_input("Código Interno (Ej: TUB-001)")
             nombre = st.text_input('Nombre del Producto (Ej: Tubo PVC Desagüe 4")')
-            categoria = st.selectbox(
-                "Categoría",
-                [
-                    "Gasfitería", "Electricidad", "Construcción", "Herramientas",
-                    "Pinturas", "Plásticos", "Limpieza", "Iluminación", "Otros",
-                ],
-            )
+            categoria = st.selectbox("Categoría", CATEGORIAS_DISPONIBLES)
             if proveedores_dict:
                 lista_nombres_prov = list(proveedores_dict.keys())
                 prov_seleccionado = st.selectbox("Proveedor", lista_nombres_prov)
@@ -159,17 +145,10 @@ elif menu == "Registrar Producto":
                 prov_seleccionado = None
 
         with col2:
-            unidad = st.selectbox(
-                "Unidad de Medida",
-                ["Unidad", "Docena", "Metro", "Kilo", "Litro", "Caja"],
-            )
+            unidad = st.selectbox("Unidad de Medida", ["Unidad", "Docena", "Metro", "Kilo", "Litro", "Caja"])
             stock = st.number_input("Stock Inicial", min_value=0.0, value=0.00000, step=0.00001, format="%.5f")
-            precio_venta = st.number_input(
-                "Precio de Venta (S/)", min_value=0.0, value=0.00000, step=0.00001, format="%.5f"
-            )
-            precio_compra = st.number_input(
-                "Precio de Compra / Costo (S/)", min_value=0.0, value=0.00000, step=0.00001, format="%.5f"
-            )
+            precio_venta = st.number_input("Precio de Venta (S/)", min_value=0.0, value=0.00000, step=0.00001, format="%.5f")
+            precio_compra = st.number_input("Precio de Compra / Costo (S/)", min_value=0.0, value=0.00000, step=0.00001, format="%.5f")
             
         submit = st.form_submit_button("Guardar Producto")
         if submit:
@@ -182,11 +161,7 @@ elif menu == "Registrar Producto":
                                 INSERT INTO productos (codigo_interno, nombre, categoria, unidad_medida, stock, precio_venta, precio_compra, proveedor_id)
                                 VALUES (:codigo, :nombre, :categoria, :unidad, :stock, :precio_venta, :precio_compra, :prov_id)
                             """),
-                            dict(
-                                codigo=codigo, nombre=nombre, categoria=categoria,
-                                unidad=unidad, stock=stock, precio_venta=precio_venta,
-                                precio_compra=precio_compra, prov_id=prov_id,
-                            ),
+                            dict(codigo=codigo, nombre=nombre, categoria=categoria, unidad=unidad, stock=stock, precio_venta=precio_venta, precio_compra=precio_compra, prov_id=prov_id),
                         )
                         s.commit()
                     st.success(f"¡Producto '{nombre}' registrado con éxito!")
@@ -196,7 +171,7 @@ elif menu == "Registrar Producto":
                 st.warning("Completa al menos el código y el nombre.")
 
 # -------------------------------------------------------------
-# 4. MODIFICAR DATOS DEL PRODUCTO
+# 4. MODIFICAR DATOS DEL PRODUCTO (CON FILTRO DE CATEGORÍA)
 # -------------------------------------------------------------
 elif menu == "Modificar Datos del Producto":
     st.header("✏️ Modificar Datos, Categoría o Proveedor de Producto")
@@ -205,30 +180,28 @@ elif menu == "Modificar Datos del Producto":
     df_prov = conn.query("SELECT id, nombre FROM proveedores", ttl=0)
     proveedores_dict = dict(zip(df_prov["nombre"], df_prov["id"])) if not df_prov.empty else {}
     
-    busqueda_edit = st.text_input(
-        "🔍 Escribe para buscar el producto que deseas corregir (por nombre o código):"
-    )
+    # 🔍 Filtro de categoría en la parte superior
+    cat_filtro_mod = st.selectbox("📂 Filtrar productos por categoría:", ["Todas las Categorías"] + CATEGORIAS_DISPONIBLES)
+    
+    busqueda_edit = st.text_input("🔍 Escribe para buscar el producto (por nombre o código):")
+    
+    # Construir consulta con filtro de categoría opcional
+    query_edit = "SELECT id, codigo_interno, nombre, categoria, unidad_medida, proveedor_id FROM productos WHERE 1=1"
+    if cat_filtro_mod != "Todas las Categorías":
+        query_edit += f" AND categoria = '{cat_filtro_mod}'"
     if busqueda_edit:
-        query_edit = f"SELECT id, codigo_interno, nombre, categoria, unidad_medida, proveedor_id FROM productos WHERE nombre ILIKE '%{busqueda_edit}%' OR codigo_interno ILIKE '%{busqueda_edit}%'"
-    else:
-        query_edit = (
-            "SELECT id, codigo_interno, nombre, categoria, unidad_medida, proveedor_id FROM productos"
-        )
+        query_edit += f" AND (nombre ILIKE '%{busqueda_edit}%' OR codigo_interno ILIKE '%{busqueda_edit}%')"
+        
     df_prod_edit = conn.query(query_edit, ttl=0)
     if df_prod_edit.empty:
-        st.info("No se encontró ningún producto.")
+        st.info("No se encontró ningún producto con los filtros seleccionados.")
     else:
         df_prod_edit["opcion_modificar"] = (
-            df_prod_edit["nombre"] + " [Código actual: " + df_prod_edit["codigo_interno"] + "]"
+            df_prod_edit["nombre"] + " [" + df_prod_edit["categoria"] + "] (Código: " + df_prod_edit["codigo_interno"] + ")"
         )
-        prod_seleccionado_edit = st.selectbox(
-            "Selecciona el producto a editar:",
-            df_prod_edit["opcion_modificar"],
-        )
+        prod_seleccionado_edit = st.selectbox("Selecciona el producto a editar:", df_prod_edit["opcion_modificar"])
         if prod_seleccionado_edit:
-            idx_e = df_prod_edit[
-                df_prod_edit["opcion_modificar"] == prod_seleccionado_edit
-            ].index[0]
+            idx_e = df_prod_edit[df_prod_edit["opcion_modificar"] == prod_seleccionado_edit].index[0]
             id_prod = df_prod_edit.loc[idx_e, "id"]
             cod_actual = df_prod_edit.loc[idx_e, "codigo_interno"]
             nom_actual = df_prod_edit.loc[idx_e, "nombre"]
@@ -236,12 +209,8 @@ elif menu == "Modificar Datos del Producto":
             uni_actual = df_prod_edit.loc[idx_e, "unidad_medida"]
             prov_actual_id = df_prod_edit.loc[idx_e, "proveedor_id"]
             
-            categorias_disponibles = [
-                "Gasfitería", "Electricidad", "Construcción", "Herramientas",
-                "Pinturas", "Plásticos", "Limpieza", "Iluminación", "Otros",
-            ]
             try:
-                cat_index = categorias_disponibles.index(cat_actual)
+                cat_index = CATEGORIAS_DISPONIBLES.index(cat_actual)
             except ValueError:
                 cat_index = 0
                 
@@ -263,7 +232,7 @@ elif menu == "Modificar Datos del Producto":
                 st.write("📝 **Modifica los campos necesarios y guarda los cambios:**")
                 nuevo_codigo = st.text_input("Código Interno", value=cod_actual)
                 nuevo_nombre = st.text_input("Nombre del Producto", value=nom_actual)
-                nueva_categoria = st.selectbox("Categoría", categorias_disponibles, index=cat_index)
+                nueva_categoria = st.selectbox("Categoría", CATEGORIAS_DISPONIBLES, index=cat_index)
                 nueva_unidad = st.selectbox("Unidad de Medida", unidades_disponibles, index=uni_index)
                 nuevo_proveedor = st.selectbox("Proveedor", prov_names, index=prov_index if prov_names else 0)
                 
@@ -279,10 +248,7 @@ elif menu == "Modificar Datos del Producto":
                                         SET codigo_interno = :nc, nombre = :nn, categoria = :ncat, unidad_medida = :nu, proveedor_id = :nprov
                                         WHERE id = :p_id
                                     """),
-                                    dict(
-                                        nc=nuevo_codigo, nn=nuevo_nombre, ncat=nueva_categoria,
-                                        nu=nueva_unidad, nprov=nuevo_prov_id, p_id=int(id_prod),
-                                    ),
+                                    dict(nc=nuevo_codigo, nn=nuevo_nombre, ncat=nueva_categoria, nu=nueva_unidad, nprov=nuevo_prov_id, p_id=int(id_prod)),
                                 )
                                 s.commit()
                             st.success("✅ ¡Los datos del producto se actualizaron correctamente!")
@@ -293,20 +259,23 @@ elif menu == "Modificar Datos del Producto":
                         st.warning("El código y el nombre no pueden estar vacíos.")
 
 # -------------------------------------------------------------
-# 5. PRODUCTOS FALTANTES
+# 5. PRODUCTOS FALTANTES (CON SELECCIÓN Y FILTRO DE CATEGORÍA)
 # -------------------------------------------------------------
 elif menu == "Productos Faltantes":
     st.header("📝 Apuntar y Gestionar Productos Faltantes")
     conn = conectar_db()
+    
     with st.form("form_faltante"):
         st.subheader("➕ Anotar nuevo producto que falta")
         col_f1, col_f2 = st.columns(2)
         with col_f1:
             nombre_faltante = st.text_input("Nombre del producto o material que falta")
-            cantidad_sug = st.text_input("Cantidad aproximada / Observación (Ej: 5.5 unidades, 2.25 rollos)")
+            cantidad_sug = st.text_input("Cantidad aproximada / Observación (Ej: 5.5 unidades)")
+            cat_faltante = st.selectbox("Categoría del Faltante", CATEGORIAS_DISPONIBLES)
         with col_f2:
             persona_apunto = st.text_input("Tu nombre (¿Quién anota este faltante?)")
             motivo_falta = st.text_input("Motivo (Ej: Se agotó, cliente pidió más)")
+            
         btn_guardar_faltante = st.form_submit_button("📌 Guardar en la Lista de Faltantes")
         if btn_guardar_faltante:
             if nombre_faltante and persona_apunto:
@@ -315,13 +284,10 @@ elif menu == "Productos Faltantes":
                     with conn.session as s:
                         s.execute(
                             text("""
-                                INSERT INTO productos_faltantes (nombre_producto, cantidad_sugerida, motivo, apuntado_por, fecha_hora)
-                                VALUES (:nom, :cant, :mot, :per, :f_h)
+                                INSERT INTO productos_faltantes (nombre_producto, cantidad_sugerida, motivo, apuntado_por, fecha_hora, categoria)
+                                VALUES (:nom, :cant, :mot, :per, :f_h, :cat)
                             """),
-                            dict(
-                                nom=nombre_faltante, cant=cantidad_sug,
-                                mot=motivo_falta, per=persona_apunto, f_h=fecha_ahora,
-                            ),
+                            dict(nom=nombre_faltante, cant=cantidad_sug, mot=motivo_falta, per=persona_apunto, f_h=fecha_ahora, cat=cat_faltante),
                         )
                         s.commit()
                     st.success(f"✅ '{nombre_faltante}' fue agregado a la lista de faltantes correctamente.")
@@ -330,17 +296,28 @@ elif menu == "Productos Faltantes":
                     st.error(f"❌ Error al guardar el producto faltante: {e}")
             else:
                 st.warning("⚠️ Por favor, completa al menos el 'Nombre del producto' y 'Tu nombre'.")
+                
     st.divider()
     st.subheader("📋 Lista Actual de Productos Faltantes")
-    df_faltantes = conn.query("SELECT * FROM productos_faltantes ORDER BY fecha_hora DESC", ttl=0)
+    
+    # 🔍 Filtro de categoría para la tabla de faltantes
+    cat_filtro_faltantes = st.selectbox("📂 Filtrar lista por categoría:", ["Todas las Categorías"] + CATEGORIAS_DISPONIBLES, key="filtro_f")
+    
+    query_faltantes = "SELECT * FROM productos_faltantes"
+    if cat_filtro_faltantes != "Todas las Categorías":
+        query_faltantes += f" WHERE categoria = '{cat_filtro_faltantes}'"
+    query_faltantes += " ORDER BY fecha_hora DESC"
+    
+    df_faltantes = conn.query(query_faltantes, ttl=0)
+    
     if df_faltantes.empty:
-        st.info("🎉 ¡Excelente noticia! No hay ningún producto faltante anotado.")
+        st.info("🎉 ¡Excelente noticia! No hay ningún producto faltante anotado con este filtro.")
     else:
         st.dataframe(df_faltantes, use_container_width=True)
         st.markdown("---")
         st.subheader("🗑️ Marcar como Solucionado / Eliminar Faltante")
         df_faltantes["opcion_eliminar_faltante"] = (
-            "[" + df_faltantes["fecha_hora"].astype(str) + "] " + df_faltantes["nombre_producto"] + " (Apuntado por: " + df_faltantes["apuntado_por"] + ")"
+            "[" + df_faltantes["fecha_hora"].astype(str) + "] " + df_faltantes["nombre_producto"] + " (" + df_faltantes["categoria"].fillna("Sin categoría") + ") - Apuntado por: " + df_faltantes["apuntado_por"]
         )
         faltante_a_borrar = st.selectbox(
             "Selecciona el faltante que ya compraste o deseas quitar de la lista:",
@@ -359,7 +336,7 @@ elif menu == "Productos Faltantes":
                 st.error(f"❌ Error al eliminar el registro: {e}")
 
 # -------------------------------------------------------------
-# 6. REGISTRAR COMPRA / REPOSICIÓN (Actualizado a 5 decimales)
+# 6. REGISTRAR COMPRA / REPOSICIÓN
 # -------------------------------------------------------------
 elif menu == "Registrar Compra / Reposición":
     st.header("📥 Registrar Compra (Aumentar Stock y Actualizar Costos)")
@@ -387,16 +364,10 @@ elif menu == "Registrar Compra / Reposición":
             with st.form("form_compra_stock"):
                 col_c1, col_c2 = st.columns(2)
                 with col_c1:
-                    cantidad_a_comprar = st.number_input(
-                        f"Cantidad a sumar al stock ({u_medida})", min_value=0.00001, value=1.00000, step=0.00001, format="%.5f"
-                    )
-                    nuevo_precio_compra = st.number_input(
-                        "Nuevo Precio de Compra / Costo unitario (S/)", min_value=0.0, value=float(c_actual), step=0.00001, format="%.5f"
-                    )
+                    cantidad_a_comprar = st.number_input(f"Cantidad a sumar al stock ({u_medida})", min_value=0.00001, value=1.00000, step=0.00001, format="%.5f")
+                    nuevo_precio_compra = st.number_input("Nuevo Precio de Compra / Costo unitario (S/)", min_value=0.0, value=float(c_actual), step=0.00001, format="%.5f")
                 with col_c2:
-                    nuevo_precio_venta = st.number_input(
-                        "Nuevo Precio de Venta (S/)", min_value=0.0, value=float(v_actual), step=0.00001, format="%.5f"
-                    )
+                    nuevo_precio_venta = st.number_input("Nuevo Precio de Venta (S/)", min_value=0.0, value=float(v_actual), step=0.00001, format="%.5f")
                     st.write("")
                     st.write(f"**Costo Total de la Compra:** S/ {(cantidad_a_comprar * nuevo_precio_compra):,.5f}")
                 btn_guardar_compra = st.form_submit_button("➕ Registrar Compra y Actualizar Inventario")
@@ -460,7 +431,7 @@ elif menu == "Historial de Compras":
         )
 
 # -------------------------------------------------------------
-# 8. ACTUALIZAR PRECIOS (Actualizado a 5 decimales)
+# 8. ACTUALIZAR PRECIOS
 # -------------------------------------------------------------
 elif menu == "Actualizar Precios":
     st.header("🔄 Actualizar Precios Independiente")
@@ -476,9 +447,7 @@ elif menu == "Actualizar Precios":
             prod_id = df_productos.loc[idx, "id"]
             precio_actual = df_productos.loc[idx, "precio_venta"]
             st.write(f"**Precio de venta actual:** S/ {precio_actual:,.5f}")
-            nuevo_precio = st.number_input(
-                "Nuevo Precio de Venta (S/)", min_value=0.0, value=float(precio_actual), step=0.00001, format="%.5f"
-            )
+            nuevo_precio = st.number_input("Nuevo Precio de Venta (S/)", min_value=0.0, value=float(precio_actual), step=0.00001, format="%.5f")
             if st.button("Guardar Nuevo Precio"):
                 if nuevo_precio != precio_actual:
                     fecha_ahora = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -516,7 +485,7 @@ elif menu == "Historial de Precios":
         st.dataframe(df_historial, use_container_width=True)
 
 # -------------------------------------------------------------
-# 10. REGISTRAR VENTA (POS - Actualizado a 5 decimales)
+# 10. REGISTRAR VENTA (POS)
 # -------------------------------------------------------------
 elif menu == "Registrar Venta (POS)":
     st.header("🛒 Caja / Punto de Venta")
@@ -540,9 +509,7 @@ elif menu == "Registrar Venta (POS)":
         with col_cant:
             idx_sel = df_productos[df_productos["opcion_pos"] == prod_elegido].index[0]
             unidad_sel = df_productos.loc[idx_sel, "unidad_medida"]
-            cantidad_vender = st.number_input(
-                f"Cantidad ({unidad_sel})", min_value=0.00001, value=1.00000, step=0.00001, format="%.5f"
-            )
+            cantidad_vender = st.number_input(f"Cantidad ({unidad_sel})", min_value=0.00001, value=1.00000, step=0.00001, format="%.5f")
         if st.button("➕ Agregar al Carrito"):
             p_id = df_productos.loc[idx_sel, "id"]
             p_nombre = df_productos.loc[idx_sel, "nombre"]
@@ -563,9 +530,7 @@ elif menu == "Registrar Venta (POS)":
             total_original = df_carrito["subtotal"].sum()
             st.write(f"Subtotal de productos sin descuento: **S/ {total_original:,.5f}**")
             st.subheader("🏷️ Ajuste de Precio / Descuento")
-            total_venta = st.number_input(
-                "Total Final a Cobrar al Cliente (S/):", min_value=0.01, value=float(total_original), step=0.00001, format="%.5f"
-            )
+            total_venta = st.number_input("Total Final a Cobrar al Cliente (S/):", min_value=0.01, value=float(total_original), step=0.00001, format="%.5f")
             st.subheader("💳 Modalidad de Pago")
             metodo_pago = st.selectbox("Forma principal / Tipo", ["Efectivo", "Yape / Plin", "Mixto (Yape/Plin + Efectivo)", "Tarjeta"])
             monto_yape = 0.0
@@ -573,9 +538,7 @@ elif menu == "Registrar Venta (POS)":
             if metodo_pago == "Mixto (Yape/Plin + Efectivo)":
                 col_p1, col_p2 = st.columns(2)
                 with col_p1:
-                    monto_yape = st.number_input(
-                        "Monto pagado con Yape/Plin (S/)", min_value=0.0, max_value=float(total_venta), value=float(total_venta) / 2, step=0.00001, format="%.5f"
-                    )
+                    monto_yape = st.number_input("Monto pagado con Yape/Plin (S/)", min_value=0.0, max_value=float(total_venta), value=float(total_venta) / 2, step=0.00001, format="%.5f")
                 with col_p2:
                     monto_efectivo = total_venta - monto_yape
                     st.write(f"Monto automático en Efectivo: **S/ {monto_efectivo:,.5f}**")
@@ -655,7 +618,7 @@ elif menu == "Historial de Ventas":
 # -------------------------------------------------------------
 elif menu == "Eliminar Producto":
     st.header("🗑️ Eliminar Producto del Inventario")
-    st.warning("⚠️ **Precaución:** Si el producto ya tiene compras o ventas asociadas, se recomienda pasarlo a stock 0 en lugar de eliminarlo.")
+    st.warning("⚠️ **Precaución:** Se recomienda pasar a stock 0 en lugar de eliminar si tiene historial.")
     conn = conectar_db()
     busqueda_del = st.text_input("🔍 Escribe para buscar el producto que deseas eliminar (por nombre o código):")
     query_del = "SELECT id, codigo_interno, nombre, stock, precio_venta, unidad_medida FROM productos"
