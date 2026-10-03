@@ -37,7 +37,7 @@ menu = st.sidebar.selectbox(
 )
 
 # -------------------------------------------------------------
-# 1. INVENTARIO ACTUAL
+# 1. INVENTARIO ACTUAL (CON FILTRO DE CATEGORÍA)
 # -------------------------------------------------------------
 if menu == "Inventario Actual":
     conn = conectar_db()
@@ -57,6 +57,9 @@ if menu == "Inventario Actual":
         col_m3.metric("Valor Inventario (Costo)", f"S/ {valor_inventario_compra:,.5f}")
     
     st.divider()
+    
+    # 📂 Filtro de categoría en el inventario actual
+    cat_filtro_inv = st.selectbox("📂 Filtrar inventario por categoría:", ["Todas las Categorías"] + CATEGORIAS_DISPONIBLES, key="filtro_inv")
     busqueda_inv = st.text_input("🔍 Buscar producto por nombre o código en el inventario:")
     
     query = """
@@ -64,9 +67,12 @@ if menu == "Inventario Actual":
                p.stock, p.precio_venta, p.precio_compra, pr.nombre AS proveedor
         FROM productos p
         LEFT JOIN proveedores pr ON p.proveedor_id = pr.id
+        WHERE 1=1
     """
+    if cat_filtro_inv != "Todas las Categorías":
+        query += f" AND p.categoria = '{cat_filtro_inv}'"
     if busqueda_inv:
-        query += f" WHERE p.nombre ILIKE '%{busqueda_inv}%' OR p.codigo_interno ILIKE '%{busqueda_inv}%'"
+        query += f" AND (p.nombre ILIKE '%{busqueda_inv}%' OR p.codigo_interno ILIKE '%{busqueda_inv}%')"
         
     df_productos = conn.query(query, ttl=0)
     if df_productos.empty:
@@ -180,12 +186,9 @@ elif menu == "Modificar Datos del Producto":
     df_prov = conn.query("SELECT id, nombre FROM proveedores", ttl=0)
     proveedores_dict = dict(zip(df_prov["nombre"], df_prov["id"])) if not df_prov.empty else {}
     
-    # 🔍 Filtro de categoría en la parte superior
     cat_filtro_mod = st.selectbox("📂 Filtrar productos por categoría:", ["Todas las Categorías"] + CATEGORIAS_DISPONIBLES)
-    
     busqueda_edit = st.text_input("🔍 Escribe para buscar el producto (por nombre o código):")
     
-    # Construir consulta con filtro de categoría opcional
     query_edit = "SELECT id, codigo_interno, nombre, categoria, unidad_medida, proveedor_id FROM productos WHERE 1=1"
     if cat_filtro_mod != "Todas las Categorías":
         query_edit += f" AND categoria = '{cat_filtro_mod}'"
@@ -259,7 +262,7 @@ elif menu == "Modificar Datos del Producto":
                         st.warning("El código y el nombre no pueden estar vacíos.")
 
 # -------------------------------------------------------------
-# 5. PRODUCTOS FALTANTES (CON SELECCIÓN Y FILTRO DE CATEGORÍA)
+# 5. PRODUCTOS FALTANTES (CON FILTRO DE CATEGORÍA)
 # -------------------------------------------------------------
 elif menu == "Productos Faltantes":
     st.header("📝 Apuntar y Gestionar Productos Faltantes")
@@ -300,9 +303,7 @@ elif menu == "Productos Faltantes":
     st.divider()
     st.subheader("📋 Lista Actual de Productos Faltantes")
     
-    # 🔍 Filtro de categoría para la tabla de faltantes
     cat_filtro_faltantes = st.selectbox("📂 Filtrar lista por categoría:", ["Todas las Categorías"] + CATEGORIAS_DISPONIBLES, key="filtro_f")
-    
     query_faltantes = "SELECT * FROM productos_faltantes"
     if cat_filtro_faltantes != "Todas las Categorías":
         query_faltantes += f" WHERE categoria = '{cat_filtro_faltantes}'"
@@ -524,7 +525,7 @@ elif menu == "Registrar Venta (POS)":
                 })
                 st.success(f"Agregado: {p_nombre} ({cantidad_vender:,.5f} {unidad_sel})")
         if st.session_state.carrito:
-            st.subheader("🛍️ Productos en el Ticket Actual")
+            st.subheader("🛍️️ Productos en el Ticket Actual")
             df_carrito = pd.DataFrame(st.session_state.carrito)
             st.dataframe(df_carrito[["nombre", "cantidad", "precio", "subtotal"]], use_container_width=True)
             total_original = df_carrito["subtotal"].sum()
