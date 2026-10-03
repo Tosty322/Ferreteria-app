@@ -67,7 +67,7 @@ if menu_diarias != "Ninguna":
 elif menu_gestion != "Ninguna":
     menu = menu_gestion
 else:
-    menu = "Inventario Actual" # Valor por defecto
+    menu = "Inventario Actual"
 
 # -------------------------------------------------------------
 # 1. INVENTARIO ACTUAL
@@ -347,7 +347,7 @@ elif menu == "Productos Faltantes":
     else:
         st.dataframe(df_faltantes, use_container_width=True)
         st.markdown("---")
-        st.subheader("🗑️️ Marcar como Solucionado / Eliminar Faltante")
+        st.subheader("🗑️ Marcar como Solucionado / Eliminar Faltante")
         df_faltantes["opcion_eliminar_faltante"] = (
             "[" + df_faltantes["fecha_hora"].astype(str) + "] " + df_faltantes["nombre_producto"] + " (" + df_faltantes["categoria"].fillna("Sin categoría") + ") - Apuntado por: " + df_faltantes["apuntado_por"]
         )
@@ -706,14 +706,17 @@ elif menu == "Registrar Venta (POS)":
             p_nombre = df_productos.loc[idx_sel, "nombre"]
             p_stock = df_productos.loc[idx_sel, "stock"]
             p_precio = df_productos.loc[idx_sel, "precio_venta"]
+            
+            # ADVERTENCIA INFORMATIVA SI EL STOCK ES 0 O INSUFICIENTE, PERO PERMITIENDO LA VENTA
             if cantidad_vender > p_stock:
-                st.error(f"¡Stock insuficiente! Stock disponible: {p_stock:,.5f} {unidad_sel}")
-            else:
-                st.session_state.carrito.append({
-                    "id": int(p_id), "nombre": p_nombre, "cantidad": float(cantidad_vender),
-                    "precio": float(p_precio), "subtotal": float(cantidad_vender * p_precio),
-                })
-                st.success(f"Agregado: {p_nombre} ({cantidad_vender:,.5f} {unidad_sel})")
+                st.warning(f"⚠️ Stock insuficiente ({p_stock:,.5f} {unidad_sel} disponibles). Se agregará al carrito y el stock quedará en 0.")
+            
+            st.session_state.carrito.append({
+                "id": int(p_id), "nombre": p_nombre, "cantidad": float(cantidad_vender),
+                "precio": float(p_precio), "subtotal": float(cantidad_vender * p_precio),
+            })
+            st.success(f"Agregado: {p_nombre} ({cantidad_vender:,.5f} {unidad_sel})")
+
         if st.session_state.carrito:
             st.subheader("🛍️ Productos en el Ticket Actual")
             df_carrito = pd.DataFrame(st.session_state.carrito)
@@ -763,7 +766,15 @@ elif menu == "Registrar Venta (POS)":
                                     """),
                                     dict(v_id=int(venta_id), p_id=int(item["id"]), cant=float(item["cantidad"]), p_u=float(precio_unitario_proporcional), sub=float(subtotal_proporcional)),
                                 )
-                                s.execute(text("UPDATE productos SET stock = stock - :cant WHERE id = :p_id"), dict(cant=float(item["cantidad"]), p_id=int(item["id"])))
+                                # LÓGICA MODIFICADA: Si el stock actual es menor a lo vendido, lo fija en 0 en vez de dejarlo negativo
+                                s.execute(text("""
+                                    UPDATE productos 
+                                    SET stock = CASE 
+                                        WHEN stock >= :cant THEN stock - :cant 
+                                        ELSE 0 
+                                    END 
+                                    WHERE id = :p_id
+                                """), dict(cant=float(item["cantidad"]), p_id=int(item["id"])))
                             s.commit()
                         st.success(f"🎉 ¡Venta registrada con éxito! **N° de Boleta: #{venta_id:04d}**")
                         st.session_state.carrito = []
