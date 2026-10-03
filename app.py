@@ -34,7 +34,7 @@ menu = st.sidebar.selectbox(
         "Modificar Datos del Producto",
         "Productos Faltantes",
         "Control de Gastos",
-        "Corte de Caja y Balance",  # <--- NUEVO APARTADO
+        "Corte de Caja y Balance",
         "Registrar Compra / Reposición",
         "Historial de Compras",
         "Actualizar Precios",
@@ -405,13 +405,12 @@ elif menu == "Control de Gastos":
         st.dataframe(df_gastos, use_container_width=True)
 
 # -------------------------------------------------------------
-# 7. CORTE DE CAJA Y BALANCE DIARIO (NUEVO APARTADO)
+# 7. CORTE DE CAJA Y BALANCE DIARIO
 # -------------------------------------------------------------
 elif menu == "Corte de Caja y Balance":
     st.header("💰 Corte de Caja y Balance Diario")
     conn = conectar_db()
     
-    # Selector de fecha para el corte (Por defecto hoy)
     col_f1, col_f2 = st.columns(2)
     with col_f1:
         fecha_corte = st.date_input("📅 Selecciona la fecha para el balance:", datetime.now())
@@ -455,13 +454,20 @@ elif menu == "Corte de Caja y Balance":
 
     st.divider()
 
-    # Cálculo teórico en efectivo
-    efectivo_teorico = ing_efectivo - gast_efectivo
-    
-    st.subheader("💵 Balance de Efectivo en Caja")
-    st.info(f"💡 **Efectivo neto en caja (Ingresos - Gastos en efectivo):** S/ {efectivo_teorico:,.5f}")
+    # Cálculo claro de la diferencia (Ingresos - Gastos)
+    dif_efectivo = ing_efectivo - gast_efectivo
+    dif_yape = ing_yape - gast_yape
 
-    # Definir fondo / efectivo que se deja para el día siguiente
+    st.subheader("⚖️ Diferencia (Ingresos - Gastos)")
+    col_d1, col_d2 = st.columns(2)
+    col_d1.metric("Neto en Efectivo (Ingresos - Gastos)", f"S/ {dif_efectivo:,.5f}")
+    col_d2.metric("Neto en Yape / Plin (Ingresos - Gastos)", f"S/ {dif_yape:,.5f}")
+
+    st.divider()
+
+    st.subheader("💵 Balance y Cierre de Caja Física")
+    st.info(f"💡 **Efectivo neto en caja:** S/ {dif_efectivo:,.5f}")
+
     efectivo_que_se_deja = st.number_input(
         "🪙 ¿Cuánto efectivo se está dejando en caja para el día siguiente? (Fondo / Vuelto):",
         min_value=0.00001,
@@ -470,8 +476,7 @@ elif menu == "Corte de Caja y Balance":
         format="%.5f"
     )
 
-    # Cuanto debería haber para retirar / cerrar caja
-    efectivo_a_retirar_o_cerrar = efectivo_teorico - efectivo_que_se_deja
+    efectivo_a_retirar_o_cerrar = dif_efectivo - efectivo_que_se_deja
 
     st.success(f"🔒 **Total de efectivo que DEBERÍA HABER en caja para retirar / cierre de hoy:** S/ {efectivo_a_retirar_o_cerrar:,.5f}")
 
@@ -789,4 +794,4 @@ elif menu == "Eliminar Producto":
                     except Exception as e:
                         st.error(f"❌ Error al actualizar el producto: {e}")
                 else:
-                    st.warning("Por favor, marca la casilla de confirmación antes de proceder.")
+                    st.warning("⚠️ Por favor, marca la casilla de confirmación antes de proceder.")
