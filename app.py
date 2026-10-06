@@ -872,3 +872,41 @@ elif menu == "Eliminar Producto":
                         st.error(f"❌ Error al actualizar el producto: {e}")
                 else:
                     st.warning("⚠️ Por favor, marca la casilla de confirmación antes de proceder.")
+import streamlit as st
+
+st.header("Gestión de Gastos (Eliminar o Editar)")
+
+# Datos de ejemplo en session_state (si ya tienes una lista de gastos, usa la tuya)
+if "gastos" not in st.session_state:
+    st.session_state["gastos"] = [
+        {"id": 1, "descripcion": "Compra de herramientas", "monto": 150.0},
+        {"id": 2, "descripcion": "Pago de luz", "monto": 80.0}
+    ]
+
+if not st.session_state["gastos"]:
+    st.info("No hay gastos registrados.")
+else:
+    # Mostrar la lista de gastos con opciones
+    for i, gasto in enumerate(st.session_state["gastos"]):
+        with st.expander(f"Gasto #{i+1}: {gasto['descripcion']} - ${gasto['monto']:.2f}"):
+            
+            # Formulario o campos para EDITAR
+            nueva_desc = st.text_input("Descripción", value=gasto["descripcion"], key=f"desc_{i}")
+            nuevo_monto = st.number_input("Monto", value=float(gasto["monto"]), min_value=0.01, key=f"monto_{i}")
+            
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                # Botón para GUARDAR CAMBIOS (Editar)
+                if st.button("Actualizar Gasto", key=f"edit_{i}"):
+                    st.session_state["gastos"][i]["descripcion"] = nueva_desc
+                    st.session_state["gastos"][i]["monto"] = nuevo_monto
+                    st.success("¡Gasto actualizado correctamente!")
+                    st.rerun()
+            
+            with col2:
+                # Botón para BORRAR
+                if st.button("Eliminar Gasto", key=f"del_{i}", type="primary"):
+                    st.session_state["gastos"].pop(i)
+                    st.warning("Gasto eliminado.")
+                    st.rerun()
