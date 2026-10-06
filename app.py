@@ -39,7 +39,7 @@ menu_diarias = st.sidebar.radio(
         "Registrar Venta (POS)",
         "Control de Gastos",
         "Modificar / Eliminar Gastos",
-        "Corte de Caja y Balance",
+        "Resumen Diario",  # CAMBIADO DE CORTE DE CAJA A RESUMEN DIARIO
         "Productos Faltantes",
         "Historial de Ventas",
     ],
@@ -364,7 +364,7 @@ elif menu == "Productos Faltantes":
     else:
         st.dataframe(df_faltantes, use_container_width=True)
         st.markdown("---")
-        st.subheader("🗑️️ Marcar como Solucionado / Eliminar Faltante")
+        st.subheader("🗑️ Marcar como Solucionado / Eliminar Faltante")
         df_faltantes["opcion_eliminar_faltante"] = (
             "[" + df_faltantes["fecha_hora"].astype(str) + "] " + df_faltantes["nombre_producto"] + " (" + df_faltantes["categoria"].fillna("Sin categoría") + ") - Apuntado por: " + df_faltantes["apuntado_por"]
         )
@@ -546,89 +546,79 @@ elif menu == "Modificar / Eliminar Gastos":
                         st.error(f"❌ Error al eliminar el gasto: {e}")
 
 # -------------------------------------------------------------
-# 7. CORTE DE CAJA Y BALANCE DIARIO (INDEPENDIENTE POR DÍA)
+# 7. RESUMEN DIARIO (INDEPENDIENTE POR DÍA)
 # -------------------------------------------------------------
-elif menu == "Corte de Caja y Balance":
-    st.header("💰 Corte de Caja y Balance Diario")
+elif menu == "Resumen Diario":
+    st.header("📊 Resumen Diario y Balance Independiente")
     conn = conectar_db()
     
     col_f1, _ = st.columns(2)
     with col_f1:
-        fecha_corte = st.date_input("📅 Selecciona la fecha para el corte de caja:", datetime.now())
+        fecha_resumen = st.date_input("📅 Selecciona la fecha para consultar el resumen:", datetime.now())
     
-    fecha_str = fecha_corte.strftime("%Y-%m-%d")
+    fecha_str = fecha_resumen.strftime("%Y-%m-%d")
     
-    # 1. Ingresos y salidas en EFECTIVO exclusivamente de la fecha seleccionada
+    # 1. Ventas en EFECTIVO de la fecha seleccionada
     query_ing_efectivo = f"""
-        SELECT COALESCE(SUM(monto_efectivo), 0) AS total_ingreso_efectivo 
+        SELECT COALESCE(SUM(monto_efectivo), 0) AS total_efectivo 
         FROM ventas 
         WHERE DATE(fecha_hora) = '{fecha_str}'
     """
     df_ie = conn.query(query_ing_efectivo, ttl=0)
-    ingreso_efectivo_dia = df_ie.loc[0, "total_ingreso_efectivo"]
+    venta_efectivo_dia = df_ie.loc[0, "total_efectivo"]
 
-    query_gast_efectivo = f"""
-        SELECT COALESCE(SUM(monto), 0) AS total_gasto_efectivo 
-        FROM gastos 
-        WHERE DATE(fecha_hora) = '{fecha_str}' AND metodo_pago = 'Efectivo'
-    """
-    df_ge = conn.query(query_gast_efectivo, ttl=0)
-    gasto_efectivo_dia = df_ge.loc[0, "total_gasto_efectivo"]
-
-    efectivo_neto_ventas = ingreso_efectivo_dia - gasto_efectivo_dia
-
-    # 2. Ingresos y salidas en YAPE / PLIN exclusivamente de la fecha seleccionada
+    # 2. Ventas en YAPE / PLIN de la fecha seleccionada
+    # Nota: Si el método de pago es "Yape / Plin" o "Mixto", usamos monto_yape. Como monto_yape almacena la parte de yape/plin (y 0 si fue solo efectivo), sumarlo directamente da el total de yape/plin del día.
     query_ing_yape = f"""
-        SELECT COALESCE(SUM(monto_yape), 0) AS total_ingreso_yape 
+        SELECT COALESCE(SUM(monto_yape), 0) AS total_yape 
         FROM ventas 
         WHERE DATE(fecha_hora) = '{fecha_str}'
     """
     df_iy = conn.query(query_ing_yape, ttl=0)
-    ingreso_yape_dia = df_iy.loc[0, "total_ingreso_yape"]
+    venta_yape_dia = df_iy.loc[0, "total_yape"]
 
+    # 3. Gastos en EFECTIVO de la fecha seleccionada
+    query_gast_efectivo = f"""
+        SELECT COALESCE(SUM(monto), 0) AS gasto_efectivo 
+        FROM gastos 
+        WHERE DATE(fecha_hora) = '{fecha_str}' AND metodo_pago = 'Efectivo'
+    """
+    df_ge = conn.query(query_gast_efectivo, ttl=0)
+    gasto_efectivo_dia = df_ge.loc[0, "gasto_efectivo"]
+
+    # 4. Gastos en YAPE / PLIN de la fecha seleccionada
     query_gast_yape = f"""
-        SELECT COALESCE(SUM(monto), 0) AS total_gasto_yape 
+        SELECT COALESCE(SUM(monto), 0) AS gasto_yape 
         FROM gastos 
         WHERE DATE(fecha_hora) = '{fecha_str}' AND metodo_pago = 'Yape / Plin'
     """
     df_gy = conn.query(query_gast_yape, ttl=0)
-    gasto_yape_dia = df_gy.loc[0, "total_gasto_yape"]
+    gasto_yape_dia = df_gy.loc[0, "gasto_yape"]
 
-    yape_neto_dia = ingreso_yape_dia - gasto_yape_dia
+    # 5. Cálculo de Ganancias (Ingresos menos Gastos por cada método)
+    ganancia_efectivo = venta_efectivo_dia - gasto_efectivo_dia
+    ganancia_yape = venta_yape_dia - gasto_yape_dia
 
-    # SECCIÓN 1: CONTROL DE EFECTIVO DEL DÍA
-    st.subheader(f"💵 Control de Efectivo del Día: {fecha_str}")
-    col_e1, col_e2, col_e3 = st.columns(3)
-    col_e1.metric("📥 Ventas en Efectivo", f"S/ {ingreso_efectivo_dia:,.5f}")
-    col_e2.metric("📤 Gastos en Efectivo", f"S/ {gasto_efectivo_dia:,.5f}")
-    col_e3.metric("🪙 Efectivo Neto Ventas", f"S/ {efectivo_neto_ventas:,.5f}")
+    # PRESENTACIÓN EN MÉTRICAS
+    st.subheader(f"📅 Reporte para la fecha: {fecha_str}")
+    
+    st.markdown("### 💵 Balance en Efectivo")
+    col_1, col_2, col_3 = st.columns(3)
+    col_1.metric("📥 Vendido en Efectivo", f"S/ {venta_efectivo_dia:,.5f}")
+    col_2.metric("📤 Gastado en Efectivo", f"S/ {gasto_efectivo_dia:,.5f}")
+    col_3.metric("🪙 Ganancia Neta Efectivo", f"S/ {ganancia_efectivo:,.5f}")
 
     st.markdown("---")
-    st.info("💡 Si deseas agregar más efectivo a la caja para el fondo o gestión del día seleccionado, ingrésalo aquí:")
 
-    dinero_extra_ingresado = st.number_input(
-        "➕ Dinero adicional en efectivo que se agrega (S/):",
-        min_value=0.00001,
-        value=0.00001,
-        step=0.00001,
-        format="%.5f"
-    )
-
-    efectivo_total_en_caja = efectivo_neto_ventas + dinero_extra_ingresado
-    st.success(f"🔒 **Total de EFECTIVO QUE DEBE HABER EN CAJA:** S/ {efectivo_total_en_caja:,.5f}")
+    st.markdown("### 📱 Balance en Yape / Plin")
+    col_4, col_5, col_6 = st.columns(3)
+    col_4.metric("📥 Vendido en Yape / Plin", f"S/ {venta_yape_dia:,.5f}")
+    col_5.metric("📤 Gastado en Yape / Plin", f"S/ {gasto_yape_dia:,.5f}")
+    col_6.metric("📱 Ganancia Neta Yape / Plin", f"S/ {ganancia_yape:,.5f}")
 
     st.divider()
 
-    # SECCIÓN 2: BALANCE DE YAPE / PLIN DEL DÍA
-    st.subheader(f"📱 Balance de Yape / Plin del Día: {fecha_str}")
-    col_y1, col_y2, col_y3 = st.columns(3)
-    col_y1.metric("📥 Ingresos por Yape / Plin", f"S/ {ingreso_yape_dia:,.5f}")
-    col_y2.metric("📤 Salidas / Gastos por Yape", f"S/ {gasto_yape_dia:,.5f}")
-    col_y3.metric("📱 Total Neto Yape / Plin", f"S/ {yape_neto_dia:,.5f}")
-
-    st.divider()
-
-    # HISTORIAL COMBINADO EXCLUSIVO DE LA FECHA SELECCIONADA PARA DESCARGA CSV
+    # HISTORIAL DE MOVIMIENTOS EXCLUSIVOS DE LA FECHA SELECCIONADA
     query_v_hist = f"""
         SELECT fecha_hora, 'INGRESO (Venta)' AS tipo, metodo_pago, total AS monto, 
                CONCAT('Efectivo: S/ ', monto_efectivo, ' | Yape/Plin: S/ ', monto_yape) AS detalle
@@ -645,22 +635,23 @@ elif menu == "Corte de Caja y Balance":
     """
     df_g_h = conn.query(query_g_hist, ttl=0)
 
-    df_corte_combinado = pd.concat([df_v_h, df_g_h], ignore_index=True)
-    if not df_corte_combinado.empty:
-        df_corte_combinado["fecha_hora"] = pd.to_datetime(df_corte_combinado["fecha_hora"])
-        df_corte_combinado = df_corte_combinado.sort_values(by="fecha_hora", ascending=False)
+    df_resumen_combinado = pd.concat([df_v_h, df_g_h], ignore_index=True)
+    if not df_resumen_combinado.empty:
+        df_resumen_combinado["fecha_hora"] = pd.to_datetime(df_resumen_combinado["fecha_hora"])
+        df_resumen_combinado = df_resumen_combinado.sort_values(by="fecha_hora", ascending=False)
 
-    st.subheader(f"📥 Descargar Reporte del Día: {fecha_str}")
-    if not df_corte_combinado.empty:
-        csv_corte = df_corte_combinado.to_csv(index=False).encode("utf-8")
+    st.subheader(f"📥 Movimientos Registrados el {fecha_str}")
+    if not df_resumen_combinado.empty:
+        st.dataframe(df_resumen_combinado, use_container_width=True)
+        csv_resumen = df_resumen_combinado.to_csv(index=False).encode("utf-8")
         st.download_button(
-            label=f"📥 Descargar Reporte Completo del Día - {fecha_str} (CSV)",
-            data=csv_corte,
-            file_name=f"corte_caja_y_yape_{fecha_str}.csv",
+            label=f"📥 Descargar Resumen del Día - {fecha_str} (CSV)",
+            data=csv_resumen,
+            file_name=f"resumen_diario_{fecha_str}.csv",
             mime="text/csv",
         )
     else:
-        st.info(f"No hay movimientos registrados para la fecha seleccionada ({fecha_str}). Cada día comienza limpio en 0.")
+        st.info(f"No hay movimientos registrados para la fecha seleccionada ({fecha_str}). Cada día comienza limpio de manera independiente.")
 
 # -------------------------------------------------------------
 # 8. REGISTRAR COMPRA / REPOSICIÓN
@@ -821,173 +812,3 @@ elif menu == "Registrar Venta (POS)":
     query_pos = "SELECT id, codigo_interno, nombre, stock, precio_venta, unidad_medida FROM productos"
     if filtro_pos:
         query_pos += f" WHERE nombre ILIKE '%{filtro_pos}%' OR codigo_interno ILIKE '%{filtro_pos}%'"
-    df_productos = conn.query(query_pos, ttl=0)
-    if df_productos.empty:
-        st.warning("No se encontró ningún producto registrado.")
-    else:
-        if "carrito" not in st.session_state:
-            st.session_state.carrito = []
-        df_productos["opcion_pos"] = (
-            df_productos["nombre"] + " ➡️ [Unidad: " + df_productos["unidad_medida"] + "] | Stock: " + df_productos["stock"].map('{:,.5f}'.format) + " | S/ " + df_productos["precio_venta"].map('{:,.5f}'.format)
-        )
-        col_select, col_cant = st.columns([3, 1])
-        with col_select:
-            prod_elegido = st.selectbox("Selecciona el producto filtrado:", df_productos["opcion_pos"])
-        with col_cant:
-            idx_sel = df_productos[df_productos["opcion_pos"] == prod_elegido].index[0]
-            unidad_sel = df_productos.loc[idx_sel, "unidad_medida"]
-            cantidad_vender = st.number_input(f"Cantidad ({unidad_sel})", min_value=0.00001, value=1.00000, step=0.00001, format="%.5f")
-        if st.button("➕ Agregar al Carrito"):
-            p_id = df_productos.loc[idx_sel, "id"]
-            p_nombre = df_productos.loc[idx_sel, "nombre"]
-            p_stock = df_productos.loc[idx_sel, "stock"]
-            p_precio = df_productos.loc[idx_sel, "precio_venta"]
-            
-            if cantidad_vender > p_stock:
-                st.warning(f"⚠️ Stock insuficiente ({p_stock:,.5f} {unidad_sel} disponibles). Se agregará al carrito y el stock quedará en 0.")
-            
-            st.session_state.carrito.append({
-                "id": int(p_id), "nombre": p_nombre, "cantidad": float(cantidad_vender),
-                "precio": float(p_precio), "subtotal": float(cantidad_vender * p_precio),
-            })
-            st.success(f"Agregado: {p_nombre} ({cantidad_vender:,.5f} {unidad_sel})")
-        if st.session_state.carrito:
-            st.subheader("🛍️ Productos en el Ticket Actual")
-            df_carrito = pd.DataFrame(st.session_state.carrito)
-            st.dataframe(df_carrito[["nombre", "cantidad", "precio", "subtotal"]], use_container_width=True)
-            total_original = df_carrito["subtotal"].sum()
-            st.write(f"Subtotal de productos sin descuento: **S/ {total_original:,.5f}**")
-            st.subheader("🏷️ Ajuste de Precio / Descuento")
-            total_venta = st.number_input(
-                "Total Final a Cobrar al Cliente (S/):", 
-                min_value=0.01, 
-                value=max(0.01, float(total_original)), 
-                step=0.00001, 
-                format="%.5f"
-            )
-            st.subheader("💳 Modalidad de Pago")
-            metodo_pago = st.selectbox("Forma principal / Tipo", ["Efectivo", "Yape / Plin", "Mixto (Yape/Plin + Efectivo)", "Tarjeta"])
-            monto_yape = 0.0
-            monto_efectivo = 0.0
-            if metodo_pago == "Mixto (Yape/Plin + Efectivo)":
-                col_p1, col_p2 = st.columns(2)
-                with col_p1:
-                    monto_yape = st.number_input("Monto pagado con Yape/Plin (S/)", min_value=0.0, max_value=float(total_venta), value=float(total_venta) / 2, step=0.00001, format="%.5f")
-                with col_p2:
-                    monto_efectivo = total_venta - monto_yape
-                    st.write(f"Monto automático en Efectivo: **S/ {monto_efectivo:,.5f}**")
-            elif metodo_pago == "Yape / Plin":
-                monto_yape = total_venta
-            elif metodo_pago == "Efectivo":
-                monto_efectivo = total_venta
-            col_btn1, col_btn2 = st.columns(2)
-            with col_btn1:
-                if st.button("✅ Confirmar y Registrar Venta (Generar Boleta)"):
-                    try:
-                        fecha_venta = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                        with conn.session as s:
-                            res = s.execute(
-                                text("""
-                                    INSERT INTO ventas (fecha_hora, total, metodo_pago, monto_yape, monto_efectivo)
-                                    VALUES (:f_h, :tot, :m_p, :m_y, :m_e)
-                                    RETURNING id
-                                """),
-                                dict(f_h=fecha_venta, tot=float(total_venta), m_p=metodo_pago, m_y=float(monto_yape), m_e=float(monto_efectivo)),
-                            )
-                            venta_id = res.fetchone()[0]
-                            factor = total_venta / total_original if total_original > 0 else 1.0
-                            for item in st.session_state.carrito:
-                                subtotal_proporcional = item["subtotal"] * factor
-                                precio_unitario_proporcional = subtotal_proporcional / item["cantidad"]
-                                s.execute(
-                                    text("""
-                                        INSERT INTO detalle_ventas (venta_id, producto_id, cantidad, precio_unitario, subtotal)
-                                        VALUES (:v_id, :p_id, :cant, :p_u, :sub)
-                                    """),
-                                    dict(v_id=int(venta_id), p_id=int(item["id"]), cant=float(item["cantidad"]), p_u=float(precio_unitario_proporcional), sub=float(subtotal_proporcional)),
-                                )
-                                s.execute(text("""
-                                    UPDATE productos 
-                                    SET stock = CASE 
-                                        WHEN stock >= :cant THEN stock - :cant 
-                                        ELSE 0 
-                                    END 
-                                    WHERE id = :p_id
-                                """), dict(cant=float(item["cantidad"]), p_id=int(item["id"])))
-                            s.commit()
-                        st.success(f"🎉 ¡Venta registrada con éxito! **N° de Boleta: #{venta_id:04d}**")
-                        st.session_state.carrito = []
-                        st.rerun()
-                    except Exception as e:
-                        st.error(f"❌ Error al guardar la venta: {e}")
-            with col_btn2:
-                if st.button("🗑️ Vaciar Carrito"):
-                    st.session_state.carrito = []
-                    st.rerun()
-
-# -------------------------------------------------------------
-# 13. HISTORIAL DE VENTAS
-# -------------------------------------------------------------
-elif menu == "Historial de Ventas":
-    st.header("📊 Historial de Ventas y Boletas Detallado")
-    conn = conectar_db()
-    query_historial_completo = """
-        SELECT v.id AS n_boleta, v.fecha_hora, p.nombre AS producto, dv.cantidad, 
-               p.unidad_medida, dv.precio_unitario, dv.subtotal, v.metodo_pago, 
-               v.monto_yape, v.monto_efectivo, v.total AS total_boleta
-        FROM detalle_ventas dv
-        JOIN ventas v ON dv.venta_id = v.id
-        JOIN productos p ON dv.producto_id = p.id
-        ORDER BY v.id DESC, v.fecha_hora DESC
-    """
-    df_historial = conn.query(query_historial_completo, ttl=0)
-    if df_historial.empty:
-        st.info("No hay ventas registradas todavía.")
-    else:
-        df_historial["n_boleta"] = df_historial["n_boleta"].apply(lambda x: f"#{int(x):04d}")
-        st.dataframe(df_historial, use_container_width=True)
-        csv_data = df_historial.to_csv(index=False).encode("utf-8")
-        st.download_button(
-            label="📥 Descargar Historial Detallado en Excel (CSV)",
-            data=csv_data,
-            file_name=f"historial_ventas_boletas_{datetime.now().strftime('%Y-%m-%d')}.csv",
-            mime="text/csv",
-        )
-
-# -------------------------------------------------------------
-# 14. ELIMINAR PRODUCTO
-# -------------------------------------------------------------
-elif menu == "Eliminar Producto":
-    st.header("🗑️ Eliminar Producto del Inventario")
-    st.warning("⚠️ **Precaución:** Se recomienda pasar a stock 0 en lugar de eliminar si tiene historial.")
-    conn = conectar_db()
-    busqueda_del = st.text_input("🔍 Escribe para buscar el producto que deseas eliminar (por nombre o código):")
-    query_del = "SELECT id, codigo_interno, nombre, stock, precio_venta, unidad_medida FROM productos"
-    if busqueda_del:
-        query_del += f" WHERE nombre ILIKE '%{busqueda_del}%' OR codigo_interno ILIKE '%{busqueda_del}%'"
-    df_prod_del = conn.query(query_del, ttl=0)
-    if df_prod_del.empty:
-        st.info("No se encontró ningún producto.")
-    else:
-        df_prod_del["opcion_eliminar"] = df_prod_del["nombre"] + " [Código: " + df_prod_del["codigo_interno"] + "] - Stock: " + df_prod_del["stock"].map('{:,.5f}'.format)
-        prod_a_eliminar = st.selectbox("Selecciona el producto a eliminar:", df_prod_del["opcion_eliminar"])
-        if prod_a_eliminar:
-            idx_d = df_prod_del[df_prod_del["opcion_eliminar"] == prod_a_eliminar].index[0]
-            id_producto_borrar = df_prod_del.loc[idx_d, "id"]
-            nombre_producto_borrar = df_prod_del.loc[idx_d, "nombre"]
-            confirmar_check = st.checkbox(f"Confirmo que deseo marcar como inactivo y poner el stock a 0: '{nombre_producto_borrar}'")
-            if st.button("❌ Marcar como Inactivo / Stock a 0", type="primary"):
-                if confirmar_check:
-                    try:
-                        with conn.session as s:
-                            s.execute(
-                                text("UPDATE productos SET stock = 0, nombre = CONCAT(nombre, ' [INACTIVO]') WHERE id = :p_id"),
-                                dict(p_id=int(id_producto_borrar)),
-                            )
-                            s.commit()
-                        st.success(f"✅ El producto '{nombre_producto_borrar}' ha sido desactivado y su stock se puso en 0.")
-                        st.rerun()
-                    except Exception as e:
-                        st.error(f"❌ Error al actualizar el producto: {e}")
-                else:
-                    st.warning("⚠️ Por favor, marca la casilla de confirmación antes de proceder.")
