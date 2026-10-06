@@ -364,7 +364,7 @@ elif menu == "Productos Faltantes":
     else:
         st.dataframe(df_faltantes, use_container_width=True)
         st.markdown("---")
-        st.subheader("🗑️ Marcar como Solucionado / Eliminar Faltante")
+        st.subheader("🗑️️ Marcar como Solucionado / Eliminar Faltante")
         df_faltantes["opcion_eliminar_faltante"] = (
             "[" + df_faltantes["fecha_hora"].astype(str) + "] " + df_faltantes["nombre_producto"] + " (" + df_faltantes["categoria"].fillna("Sin categoría") + ") - Apuntado por: " + df_faltantes["apuntado_por"]
         )
@@ -461,7 +461,7 @@ elif menu == "Modificar / Eliminar Gastos":
     query_gasto_edit = f"""
         SELECT id, fecha_hora, categoria, monto, metodo_pago, anotacion, registrado_por
         FROM gastos
-        WHERE DATE(fecha_hora) = '{fecha_g_str}'
+        WHERE SUBSTRING(fecha_hora::text, 1, 10) = '{fecha_g_str}'
         ORDER BY fecha_hora DESC
     """
     df_g_edit = conn.query(query_gasto_edit, ttl=0)
@@ -558,43 +558,43 @@ elif menu == "Resumen Diario":
     
     fecha_str = fecha_resumen.strftime("%Y-%m-%d")
     
-    # 1. Ventas en EFECTIVO de la fecha seleccionada
+    # 1. Ventas en EFECTIVO exclusivamente de la fecha seleccionada
     query_ing_efectivo = f"""
         SELECT COALESCE(SUM(monto_efectivo), 0) AS total_efectivo 
         FROM ventas 
-        WHERE DATE(fecha_hora) = '{fecha_str}'
+        WHERE SUBSTRING(fecha_hora::text, 1, 10) = '{fecha_str}'
     """
     df_ie = conn.query(query_ing_efectivo, ttl=0)
     venta_efectivo_dia = df_ie.loc[0, "total_efectivo"]
 
-    # 2. Ventas en YAPE / PLIN de la fecha seleccionada
+    # 2. Ventas en YAPE / PLIN exclusivamente de la fecha seleccionada
     query_ing_yape = f"""
         SELECT COALESCE(SUM(monto_yape), 0) AS total_yape 
         FROM ventas 
-        WHERE DATE(fecha_hora) = '{fecha_str}'
+        WHERE SUBSTRING(fecha_hora::text, 1, 10) = '{fecha_str}'
     """
     df_iy = conn.query(query_ing_yape, ttl=0)
     venta_yape_dia = df_iy.loc[0, "total_yape"]
 
-    # 3. Gastos en EFECTIVO de la fecha seleccionada (¡CORREGIDO PARA FILTRAR POR FECHA Y MÉTODO!)
+    # 3. Gastos en EFECTIVO exclusivamente de la fecha seleccionada
     query_gast_efectivo = f"""
         SELECT COALESCE(SUM(monto), 0) AS gasto_efectivo 
         FROM gastos 
-        WHERE DATE(fecha_hora) = '{fecha_str}' AND metodo_pago = 'Efectivo'
+        WHERE SUBSTRING(fecha_hora::text, 1, 10) = '{fecha_str}' AND metodo_pago = 'Efectivo'
     """
     df_ge = conn.query(query_gast_efectivo, ttl=0)
     gasto_efectivo_dia = df_ge.loc[0, "gasto_efectivo"]
 
-    # 4. Gastos en YAPE / PLIN de la fecha seleccionada (¡CORREGIDO PARA FILTRAR POR FECHA Y MÉTODO!)
+    # 4. Gastos en YAPE / PLIN exclusivamente de la fecha seleccionada
     query_gast_yape = f"""
         SELECT COALESCE(SUM(monto), 0) AS gasto_yape 
         FROM gastos 
-        WHERE DATE(fecha_hora) = '{fecha_str}' AND metodo_pago = 'Yape / Plin'
+        WHERE SUBSTRING(fecha_hora::text, 1, 10) = '{fecha_str}' AND metodo_pago = 'Yape / Plin'
     """
     df_gy = conn.query(query_gast_yape, ttl=0)
     gasto_yape_dia = df_gy.loc[0, "gasto_yape"]
 
-    # 5. Cálculo de Ganancias (Ingresos menos Gastos por cada método)
+    # 5. Cálculo de Ganancias independientes del día (Ingresos menos Gastos)
     ganancia_efectivo = venta_efectivo_dia - gasto_efectivo_dia
     ganancia_yape = venta_yape_dia - gasto_yape_dia
 
@@ -622,7 +622,7 @@ elif menu == "Resumen Diario":
         SELECT fecha_hora, 'INGRESO (Venta)' AS tipo, metodo_pago, total AS monto, 
                CONCAT('Efectivo: S/ ', monto_efectivo, ' | Yape/Plin: S/ ', monto_yape) AS detalle
         FROM ventas 
-        WHERE DATE(fecha_hora) = '{fecha_str}'
+        WHERE SUBSTRING(fecha_hora::text, 1, 10) = '{fecha_str}'
     """
     df_v_h = conn.query(query_v_hist, ttl=0)
 
@@ -630,7 +630,7 @@ elif menu == "Resumen Diario":
         SELECT fecha_hora, CONCAT('GASTO (', categoria, ')') AS tipo, metodo_pago, monto, 
                COALESCE(anotacion, '') AS detalle
         FROM gastos 
-        WHERE DATE(fecha_hora) = '{fecha_str}'
+        WHERE SUBSTRING(fecha_hora::text, 1, 10) = '{fecha_str}'
     """
     df_g_h = conn.query(query_g_hist, ttl=0)
 
