@@ -39,6 +39,7 @@ menu_diarias = st.sidebar.radio(
         "Registrar Venta (POS)",
         "Control de Gastos",
         "Modificar / Eliminar Gastos",
+        "Caja Actual y Dinero en Efectivo",  # NUEVO APARTADO
         "Corte de Caja y Balance",
         "Productos Faltantes",
         "Historial de Ventas",
@@ -75,13 +76,12 @@ else:
     menu = "Inventario Actual"
 
 # -------------------------------------------------------------
-# 1. INVENTARIO ACTUAL (CON FILTRO DE PORCENTAJE DE STOCK IDEAL)
+# 1. INVENTARIO ACTUAL
 # -------------------------------------------------------------
 if menu == "Inventario Actual":
     conn = conectar_db()
     st.header("📦 Inventario Actual y Stock Total")
     
-    # Obtener lista de proveedores para el filtro
     df_prov_inv = conn.query("SELECT id, nombre FROM proveedores", ttl=0)
     proveedores_filtro_dict = dict(zip(df_prov_inv["nombre"], df_prov_inv["id"])) if not df_prov_inv.empty else {}
     
@@ -100,7 +100,6 @@ if menu == "Inventario Actual":
     
     st.divider()
     
-    # Filtros avanzados de categoría, proveedor y barra de porcentaje
     col_f1, col_f2 = st.columns(2)
     with col_f1:
         cat_filtro_inv = st.selectbox("📂 Filtrar por categoría:", ["Todas las Categorías"] + CATEGORIAS_DISPONIBLES, key="filtro_inv")
@@ -138,13 +137,9 @@ if menu == "Inventario Actual":
     df_productos = conn.query(query, ttl=0)
     
     if not df_productos.empty:
-        # Calcular porcentaje de stock actual respecto al ideal
-        # Evitamos división por cero si cantidad_ideal es 0
         df_productos["% Stock Ideal"] = df_productos.apply(
             lambda row: (row["stock"] / row["cantidad_ideal"] * 100) if row["cantidad_ideal"] > 0 else 100.0, axis=1
         )
-        
-        # Aplicar el filtro del slider si está activo
         if usar_filtro_porcentaje:
             df_productos = df_productos[df_productos["% Stock Ideal"] <= porcentaje_limite]
             
@@ -201,7 +196,7 @@ elif menu == "Gestión de Proveedores":
         st.dataframe(df_proveedores, use_container_width=True)
 
 # -------------------------------------------------------------
-# 3. REGISTRAR PRODUCTO (INCLUYE CANTIDAD IDEAL)
+# 3. REGISTRAR PRODUCTO
 # -------------------------------------------------------------
 elif menu == "Registrar Producto":
     st.header("➕ Registrar Nuevo Producto")
@@ -253,7 +248,7 @@ elif menu == "Registrar Producto":
                 st.warning("Completa al menos el código y el nombre.")
 
 # -------------------------------------------------------------
-# 4. MODIFICAR DATOS DEL PRODUCTO (INCLUYE CANTIDAD IDEAL)
+# 4. MODIFICAR DATOS DEL PRODUCTO
 # -------------------------------------------------------------
 elif menu == "Modificar Datos del Producto":
     st.header("✏️ Modificar Datos, Categoría, Proveedor o Cantidad Ideal")
@@ -577,6 +572,66 @@ elif menu == "Modificar / Eliminar Gastos":
                         st.error(f"❌ Error al eliminar el gasto: {e}")
 
 # -------------------------------------------------------------
+# 6.2 CAJA ACTUAL Y DINERO EN EFECTIVO (NUEVO APARTADO)
+# -------------------------------------------------------------
+elif menu == "Caja Actual y Dinero en Efectivo":
+    st.header("💵 Caja Actual y Control de Dinero en Efectivo")
+    conn = conectar_db()
+    
+    # 1. Calcular efectivo acumulado histórico (Ventas en efectivo - Gastos en efectivo + Dinero extra ingresado)
+    df_tot_v_ef = conn.query("SELECT COALESCE(SUM(monto_efectivo), 0) AS total FROM ventas", ttl=0)
+    total_ventas_ef = df_tot_v_ef.loc[0, "total"]
+    
+    df_tot_g_ef = conn.query("SELECT COALESCE(SUM(monto), 0) AS total FROM gastos WHERE metodo_pago = 'Efectivo'", ttl=0)
+    total_gastos_ef = df_tot_g_ef.loc[0, "total"]
+    
+    df_tot_extra = conn.query("SELECT COALESCE(SUM(monto_agregado), 0) AS total FROM ajustes_caja", ttl=0)
+    total_extra_caja = df_tot_extra.loc[0, "total"]
+    
+    efectivo_actual_caja = (total_ventas_ef - total_gastos_ef) + total_extra_caja
+    
+    st.metric("🔒 Dinero Total Actual en Caja (Operativo)", f"S/ {efectivo_actual_caja:,.5f}")
+    st.info("💡 Este saldo se acumula automáticamente con las ventas en efectivo, se descuenta únicamente al registrar gastos en efectivo, y se mantiene operativo para los días siguientes.")
+
+    st.divider()
+    st.subheader("➕ Agregar Dinero Adicional a la Caja")
+    st.warning("⚠️ **Restricción:** Solo puedes ingresar números positivos (mayores a 0). No se permiten números negativos.")
+    
+    with st.form("form_agregar_caja"):
+        monto_agregar = st.number_input("Monto adicional en efectivo a sumar (S/):", min_value=0.0, value=0.0, step=0.01, format="%.5f")
+        motivo_extra = st.text_input("Motivo / Detalle (Ej: Fondo de sencillo para cambio, inyección de capital)")
+        responsable_extra = st.text_input("Registrado por (Tu nombre)")
+        
+        btn_sumar_caja = st.form_submit_button("💰 Sumar a la Caja Actual")
+        if btn_sumar_caja:
+            if monto_agregar > 0 and responsable_extra:
+                try:
+                    fecha_ahora = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                    with conn.session as s:
+                        s.execute(
+                            text("""
+                                INSERT INTO ajustes_caja (fecha_hora, monto_agregado, motivo, registrado_por)
+                                VALUES (:f_h, :monto, :mot, :reg)
+                            """),
+                            dict(f_h=fecha_ahora, monto=float(monto_agregar), mot=motivo_extra, reg=responsable_extra),
+                        )
+                        s.commit()
+                    st.success(f"✅ Se agregaron S/ {monto_agregar:,.5f} correctamente a la caja operativa.")
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"❌ Error al registrar el fondo: {e}")
+            else:
+                st.warning("⚠️ Debes ingresar un monto positivo mayor a 0 y tu nombre.")
+
+    st.divider()
+    st.subheader("📋 Historial de Inyecciones de Dinero Extra")
+    df_historial_extra = conn.query("SELECT * FROM ajustes_caja ORDER BY fecha_hora DESC", ttl=0)
+    if df_historial_extra.empty:
+        st.info("No se han registrado inyecciones de dinero adicional todavía.")
+    else:
+        st.dataframe(df_historial_extra, use_container_width=True)
+
+# -------------------------------------------------------------
 # 7. CORTE DE CAJA Y BALANCE DIARIO
 # -------------------------------------------------------------
 elif menu == "Corte de Caja y Balance":
@@ -589,7 +644,7 @@ elif menu == "Corte de Caja y Balance":
     
     fecha_str = fecha_corte.strftime("%Y-%m-%d")
     
-    # 1. Ingresos y salidas en EFECTIVO
+    # 1. Ingresos y salidas en EFECTIVO del día
     query_ing_efectivo = f"""
         SELECT COALESCE(SUM(monto_efectivo), 0) AS total_ingreso_efectivo 
         FROM ventas 
@@ -608,7 +663,16 @@ elif menu == "Corte de Caja y Balance":
 
     efectivo_neto_ventas = ingreso_efectivo_dia - gasto_efectivo_dia
 
-    # 2. Ingresos y salidas en YAPE / PLIN
+    # Dinero extra agregado en esa fecha específica
+    query_extra_dia = f"""
+        SELECT COALESCE(SUM(monto_agregado), 0) AS total_extra 
+        FROM ajustes_caja 
+        WHERE DATE(fecha_hora) = '{fecha_str}'
+    """
+    df_ext = conn.query(query_extra_dia, ttl=0)
+    dinero_extra_dia = df_ext.loc[0, "total_extra"]
+
+    # 2. Ingresos y salidas en YAPE / PLIN del día
     query_ing_yape = f"""
         SELECT COALESCE(SUM(monto_yape), 0) AS total_ingreso_yape 
         FROM ventas 
@@ -629,24 +693,42 @@ elif menu == "Corte de Caja y Balance":
 
     # SECCIÓN 1: CONTROL DE EFECTIVO
     st.subheader(f"💵 Control de Efectivo del Día: {fecha_str}")
-    col_e1, col_e2, col_e3 = st.columns(3)
+    col_e1, col_e2, col_e3, col_e4 = st.columns(4)
     col_e1.metric("📥 Ventas en Efectivo", f"S/ {ingreso_efectivo_dia:,.5f}")
     col_e2.metric("📤 Gastos en Efectivo", f"S/ {gasto_efectivo_dia:,.5f}")
-    col_e3.metric("🪙 Efectivo Neto Ventas", f"S/ {efectivo_neto_ventas:,.5f}")
+    col_e3.metric("➕ Dinero Extra Agregado", f"S/ {dinero_extra_dia:,.5f}")
+    
+    efectivo_total_en_caja_dia = efectivo_neto_ventas + dinero_extra_dia
+    col_e4.metric("🪙 Efectivo Neto del Día", f"S/ {efectivo_total_en_caja_dia:,.5f}")
 
     st.markdown("---")
-    st.info("💡 Si deseas agregar más efectivo a la caja para el fondo o gestión del día siguiente, ingrésalo aquí:")
-
-    dinero_extra_ingresado = st.number_input(
-        "➕ Dinero adicional en efectivo que se agrega (S/):",
-        min_value=0.00001,
-        value=0.00001,
-        step=0.00001,
-        format="%.5f"
-    )
-
-    efectivo_total_en_caja = efectivo_neto_ventas + dinero_extra_ingresado
-    st.success(f"🔒 **Total de EFECTIVO QUE DEBE HABER EN CAJA:** S/ {efectivo_total_en_caja:,.5f}")
+    
+    # Opción rápida de agregar dinero extra directo desde el corte de caja
+    with st.expander("➕ ¿Deseas agregar dinero extra a la caja para la gestión de hoy o mañana?"):
+        with st.form("form_agregar_caja_corte"):
+            monto_agregar_corte = st.number_input("Monto adicional en efectivo a sumar (S/):", min_value=0.0, value=0.0, step=0.01, format="%.5f")
+            motivo_extra_corte = st.text_input("Motivo / Detalle")
+            responsable_extra_corte = st.text_input("Registrado por")
+            btn_sumar_corte = st.form_submit_button("Sumar Dinero a la Caja")
+            if btn_sumar_corte:
+                if monto_agregar_corte > 0 and responsable_extra_corte:
+                    try:
+                        fecha_ahora = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                        with conn.session as s:
+                            s.execute(
+                                text("""
+                                    INSERT INTO ajustes_caja (fecha_hora, monto_agregado, motivo, registrado_por)
+                                    VALUES (:f_h, :monto, :mot, :reg)
+                                """),
+                                dict(f_h=fecha_ahora, monto=float(monto_agregar_corte), mot=motivo_extra_corte, reg=responsable_extra_corte),
+                            )
+                            s.commit()
+                        st.success("✅ ¡Dinero agregado correctamente y guardado para operar!")
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"❌ Error: {e}")
+                else:
+                    st.warning("⚠️ Ingresa un monto positivo y tu nombre.")
 
     st.divider()
 
@@ -676,7 +758,15 @@ elif menu == "Corte de Caja y Balance":
     """
     df_g_h = conn.query(query_g_hist, ttl=0)
 
-    df_corte_combinado = pd.concat([df_v_h, df_g_h], ignore_index=True)
+    query_e_hist = f"""
+        SELECT fecha_hora, 'INYECCIÓN EFECTIVO EXTRA' AS tipo, 'Efectivo' AS metodo_pago, monto_agregado AS monto, 
+               COALESCE(motivo, '') AS detalle
+        FROM ajustes_caja 
+        WHERE DATE(fecha_hora) = '{fecha_str}'
+    """
+    df_e_h = conn.query(query_e_hist, ttl=0)
+
+    df_corte_combinado = pd.concat([df_v_h, df_g_h, df_e_h], ignore_index=True)
     if not df_corte_combinado.empty:
         df_corte_combinado["fecha_hora"] = pd.to_datetime(df_corte_combinado["fecha_hora"])
         df_corte_combinado = df_corte_combinado.sort_values(by="fecha_hora", ascending=False)
@@ -875,7 +965,7 @@ elif menu == "Registrar Venta (POS)":
             p_precio = df_productos.loc[idx_sel, "precio_venta"]
             
             if cantidad_vender > p_stock:
-                st.warning(f"⚠️️ Stock insuficiente ({p_stock:,.5f} {unidad_sel} disponibles). Se agregará al carrito y el stock quedará en 0.")
+                st.warning(f"⚠️ Stock insuficiente ({p_stock:,.5f} {unidad_sel} disponibles). Se agregará al carrito y el stock quedará en 0.")
             
             st.session_state.carrito.append({
                 "id": int(p_id), "nombre": p_nombre, "cantidad": float(cantidad_vender),
