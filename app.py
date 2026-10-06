@@ -81,7 +81,6 @@ if menu == "Inventario Actual":
     conn = conectar_db()
     st.header("📦 Inventario Actual y Stock Total")
     
-    # Obtener lista de proveedores para el filtro
     df_prov_inv = conn.query("SELECT id, nombre FROM proveedores", ttl=0)
     proveedores_filtro_dict = dict(zip(df_prov_inv["nombre"], df_prov_inv["id"])) if not df_prov_inv.empty else {}
     
@@ -100,7 +99,6 @@ if menu == "Inventario Actual":
     
     st.divider()
     
-    # Filtros avanzados de categoría y proveedor
     col_f1, col_f2 = st.columns(2)
     with col_f1:
         cat_filtro_inv = st.selectbox("📂 Filtrar por categoría:", ["Todas las Categorías"] + CATEGORIAS_DISPONIBLES, key="filtro_inv")
@@ -201,7 +199,6 @@ elif menu == "Registrar Producto":
             else:
                 st.warning("⚠️ No hay proveedores registrados.")
                 prov_seleccionado = None
-
         with col2:
             unidad = st.selectbox("Unidad de Medida", ["Unidad", "Docena", "Metro", "Kilo", "Litro", "Caja"])
             stock = st.number_input("Stock Inicial", min_value=0.0, value=0.00001, step=0.00001, format="%.5f")
@@ -282,7 +279,6 @@ elif menu == "Modificar Datos del Producto":
                     prov_current_name = p_name
                     break
             prov_index = prov_names.index(prov_current_name) if prov_current_name in prov_names else 0
-
             with st.form("form_editar_datos"):
                 st.write("📝 **Modifica los campos necesarios y guarda los cambios:**")
                 nuevo_codigo = st.text_input("Código Interno", value=cod_actual)
@@ -500,7 +496,6 @@ elif menu == "Modificar / Eliminar Gastos":
                 met_g_index = metodos_pago_disp.index(g_metodo_actual)
             except ValueError:
                 met_g_index = 0
-
             st.divider()
             with st.form("form_editar_gasto"):
                 st.subheader(f"📝 Editando Gasto ID: #{g_id}")
@@ -551,7 +546,7 @@ elif menu == "Modificar / Eliminar Gastos":
                         st.error(f"❌ Error al eliminar el gasto: {e}")
 
 # -------------------------------------------------------------
-# 7. CORTE DE CAJA Y BALANCE DIARIO (EFECTIVO + YAPE/PLIN)
+# 7. CORTE DE CAJA Y BALANCE DIARIO (AISLADO POR DÍA)
 # -------------------------------------------------------------
 elif menu == "Corte de Caja y Balance":
     st.header("💰 Corte de Caja y Balance Diario")
@@ -563,7 +558,7 @@ elif menu == "Corte de Caja y Balance":
     
     fecha_str = fecha_corte.strftime("%Y-%m-%d")
     
-    # 1. Ingresos y salidas en EFECTIVO
+    # 1. Ingresos y salidas en EFECTIVO de la fecha seleccionada
     query_ing_efectivo = f"""
         SELECT COALESCE(SUM(monto_efectivo), 0) AS total_ingreso_efectivo 
         FROM ventas 
@@ -582,7 +577,16 @@ elif menu == "Corte de Caja y Balance":
 
     efectivo_neto_ventas = ingreso_efectivo_dia - gasto_efectivo_dia
 
-    # 2. Ingresos en YAPE / PLIN (Ventas totales registradas con Yape/Plin o parte de Mixto)
+    # Dinero adicional agregado ESPECÍFICAMENTE en esa fecha (sin arrastrar de otros días)
+    query_extra_dia = f"""
+        SELECT COALESCE(SUM(monto_agregado), 0) AS total_extra 
+        FROM ajustes_caja 
+        WHERE DATE(fecha_hora) = '{fecha_str}'
+    """
+    df_ext = conn.query(query_extra_dia, ttl=0)
+    dinero_extra_dia = df_ext.loc[0, "total_extra"]
+
+    # 2. Ingresos y salidas en YAPE / PLIN de la fecha seleccionada
     query_ing_yape = f"""
         SELECT COALESCE(SUM(monto_yape), 0) AS total_ingreso_yape 
         FROM ventas 
@@ -601,30 +605,49 @@ elif menu == "Corte de Caja y Balance":
 
     yape_neto_dia = ingreso_yape_dia - gasto_yape_dia
 
-    # SECCIÓN 1: CONTROL DE EFECTIVO
+    # SECCIÓN 1: CONTROL DE EFECTIVO DEL DÍA
     st.subheader(f"💵 Control de Efectivo del Día: {fecha_str}")
-    col_e1, col_e2, col_e3 = st.columns(3)
+    col_e1, col_e2, col_e3, col_e4 = st.columns(4)
     col_e1.metric("📥 Ventas en Efectivo", f"S/ {ingreso_efectivo_dia:,.5f}")
     col_e2.metric("📤 Gastos en Efectivo", f"S/ {gasto_efectivo_dia:,.5f}")
-    col_e3.metric("🪙 Efectivo Neto Ventas", f"S/ {efectivo_neto_ventas:,.5f}")
+    col_e3.metric("➕ Dinero Extra / Fondo", f"S/ {dinero_extra_dia:,.5f}")
+    
+    efectivo_total_en_caja = efectivo_neto_ventas + dinero_extra_dia
+    col_e4.metric("🪙 Efectivo Total en Caja", f"S/ {efectivo_total_en_caja:,.5f}")
 
     st.markdown("---")
-    st.info("💡 Si deseas agregar más efectivo a la caja para el fondo o gestión del día siguiente, ingrésalo aquí:")
+    st.info("💡 Si deseas agregar más efectivo o fondo para la gestión del día seleccionado, ingrésalo aquí (Solo números positivos):")
 
-    dinero_extra_ingresado = st.number_input(
-        "➕ Dinero adicional en efectivo que se agrega (S/):",
-        min_value=0.00001,
-        value=0.00001,
-        step=0.00001,
-        format="%.5f"
-    )
-
-    efectivo_total_en_caja = efectivo_neto_ventas + dinero_extra_ingresado
-    st.success(f"🔒 **Total de EFECTIVO QUE DEBE HABER EN CAJA:** S/ {efectivo_total_en_caja:,.5f}")
+    with st.form(f"form_agregar_caja_{fecha_str}"):
+        monto_agregar = st.number_input("➕ Monto adicional en efectivo (S/):", min_value=0.0, value=0.0, step=0.01, format="%.5f")
+        motivo_extra = st.text_input("Motivo / Detalle (Ej: Fondo de cambio)")
+        responsable_extra = st.text_input("Registrado por")
+        btn_sumar_caja = st.form_submit_button("💰 Guardar Dinero Extra para este Día")
+        
+        if btn_sumar_caja:
+            if monto_agregar > 0 and responsable_extra:
+                try:
+                    # Guardamos con la fecha seleccionada en el calendario para que quede en su respectivo historial
+                    fecha_con_hora = f"{fecha_str} {datetime.now().strftime('%H:%M:%S')}"
+                    with conn.session as s:
+                        s.execute(
+                            text("""
+                                INSERT INTO ajustes_caja (fecha_hora, monto_agregado, motivo, registrado_por)
+                                VALUES (:f_h, :monto, :mot, :reg)
+                            """),
+                            dict(f_h=fecha_con_hora, monto=float(monto_agregar), mot=motivo_extra, reg=responsable_extra),
+                        )
+                        s.commit()
+                    st.success(f"✅ Se agregaron S/ {monto_agregar:,.5f} al registro del día {fecha_str}.")
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"❌ Error al registrar: {e}")
+            else:
+                st.warning("⚠️ Debes ingresar un monto positivo mayor a 0 y tu nombre.")
 
     st.divider()
 
-    # SECCIÓN 2: BALANCE DE YAPE / PLIN
+    # SECCIÓN 2: BALANCE DE YAPE / PLIN DEL DÍA
     st.subheader(f"📱 Balance de Yape / Plin del Día: {fecha_str}")
     col_y1, col_y2, col_y3 = st.columns(3)
     col_y1.metric("📥 Ingresos por Yape / Plin", f"S/ {ingreso_yape_dia:,.5f}")
@@ -633,7 +656,7 @@ elif menu == "Corte de Caja y Balance":
 
     st.divider()
 
-    # HISTORIAL COMBINADO PARA DESCARGA CSV
+    # HISTORIAL COMBINADO EXCLUSIVO DE LA FECHA SELECCIONADA PARA DESCARGA CSV
     query_v_hist = f"""
         SELECT fecha_hora, 'INGRESO (Venta)' AS tipo, metodo_pago, total AS monto, 
                CONCAT('Efectivo: S/ ', monto_efectivo, ' | Yape/Plin: S/ ', monto_yape) AS detalle
@@ -650,13 +673,22 @@ elif menu == "Corte de Caja y Balance":
     """
     df_g_h = conn.query(query_g_hist, ttl=0)
 
-    df_corte_combinado = pd.concat([df_v_h, df_g_h], ignore_index=True)
+    query_e_hist = f"""
+        SELECT fecha_hora, 'INYECCIÓN EFECTIVO EXTRA' AS tipo, 'Efectivo' AS metodo_pago, monto_agregado AS monto, 
+               COALESCE(motivo, '') AS detalle
+        FROM ajustes_caja 
+        WHERE DATE(fecha_hora) = '{fecha_str}'
+    """
+    df_e_h = conn.query(query_e_hist, ttl=0)
+
+    df_corte_combinado = pd.concat([df_v_h, df_g_h, df_e_h], ignore_index=True)
     if not df_corte_combinado.empty:
         df_corte_combinado["fecha_hora"] = pd.to_datetime(df_corte_combinado["fecha_hora"])
         df_corte_combinado = df_corte_combinado.sort_values(by="fecha_hora", ascending=False)
 
-    st.subheader("📥 Descargar Reporte del Día")
+    st.subheader(f"📥 Descargar Reporte del Día: {fecha_str}")
     if not df_corte_combinado.empty:
+        st.dataframe(df_corte_combinado, use_container_width=True)
         csv_corte = df_corte_combinado.to_csv(index=False).encode("utf-8")
         st.download_button(
             label=f"📥 Descargar Reporte Completo del Día - {fecha_str} (CSV)",
@@ -665,7 +697,7 @@ elif menu == "Corte de Caja y Balance":
             mime="text/csv",
         )
     else:
-        st.info("No hay movimientos registrados para la fecha seleccionada.")
+        st.info(f"No hay movimientos registrados para la fecha seleccionada ({fecha_str}). Cada día comienza limpio en 0.")
 
 # -------------------------------------------------------------
 # 8. REGISTRAR COMPRA / REPOSICIÓN
@@ -856,7 +888,6 @@ elif menu == "Registrar Venta (POS)":
                 "precio": float(p_precio), "subtotal": float(cantidad_vender * p_precio),
             })
             st.success(f"Agregado: {p_nombre} ({cantidad_vender:,.5f} {unidad_sel})")
-
         if st.session_state.carrito:
             st.subheader("🛍️ Productos en el Ticket Actual")
             df_carrito = pd.DataFrame(st.session_state.carrito)
