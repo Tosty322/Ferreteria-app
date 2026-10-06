@@ -229,7 +229,7 @@ elif menu == "Registrar Producto":
 # 4. MODIFICAR DATOS DEL PRODUCTO
 # -------------------------------------------------------------
 elif menu == "Modificar Datos del Producto":
-    st.header("✏️ Modificar Datos, Categoría o Proveedor de Producto")
+    st.header("✏️️ Modificar Datos, Categoría o Proveedor de Producto")
     conn = conectar_db()
     
     df_prov = conn.query("SELECT id, nombre FROM proveedores", ttl=0)
@@ -364,7 +364,7 @@ elif menu == "Productos Faltantes":
     else:
         st.dataframe(df_faltantes, use_container_width=True)
         st.markdown("---")
-        st.subheader("🗑️️ Marcar como Solucionado / Eliminar Faltante")
+        st.subheader("🗑 Marcar como Solucionado / Eliminar Faltante")
         df_faltantes["opcion_eliminar_faltante"] = (
             "[" + df_faltantes["fecha_hora"].astype(str) + "] " + df_faltantes["nombre_producto"] + " (" + df_faltantes["categoria"].fillna("Sin categoría") + ") - Apuntado por: " + df_faltantes["apuntado_por"]
         )
@@ -458,13 +458,14 @@ elif menu == "Modificar / Eliminar Gastos":
     
     fecha_g_str = fecha_filtro_gasto.strftime("%Y-%m-%d")
     
-    query_gasto_edit = f"""
-        SELECT id, fecha_hora, categoria, monto, metodo_pago, anotacion, registrado_por
-        FROM gastos
-        WHERE SUBSTRING(fecha_hora::text, 1, 10) = '{fecha_g_str}'
-        ORDER BY fecha_hora DESC
-    """
-    df_g_edit = conn.query(query_gasto_edit, ttl=0)
+    # Traemos todos los gastos y filtramos localmente con pandas
+    df_g_todos = conn.query("SELECT id, fecha_hora, categoria, monto, metodo_pago, anotacion, registrado_por FROM gastos ORDER BY fecha_hora DESC", ttl=0)
+    
+    if not df_g_todos.empty:
+        df_g_todos["fecha_sola"] = pd.to_datetime(df_g_todos["fecha_hora"]).dt.strftime("%Y-%m-%d")
+        df_g_edit = df_g_todos[df_g_todos["fecha_sola"] == fecha_g_str].copy()
+    else:
+        df_g_edit = pd.DataFrame()
     
     if df_g_edit.empty:
         st.info(f"No hay gastos registrados para la fecha {fecha_g_str}.")
@@ -558,43 +559,29 @@ elif menu == "Resumen Diario":
     
     fecha_str = fecha_resumen.strftime("%Y-%m-%d")
     
-    # 1. Ventas en EFECTIVO exclusivamente de la fecha seleccionada
-    query_ing_efectivo = f"""
-        SELECT COALESCE(SUM(monto_efectivo), 0) AS total_efectivo 
-        FROM ventas 
-        WHERE SUBSTRING(fecha_hora::text, 1, 10) = '{fecha_str}'
-    """
-    df_ie = conn.query(query_ing_efectivo, ttl=0)
-    venta_efectivo_dia = df_ie.loc[0, "total_efectivo"]
+    # 1. Obtenemos todas las ventas y filtramos localmente por fecha
+    df_ventas_todas = conn.query("SELECT * FROM ventas", ttl=0)
+    if not df_ventas_todas.empty:
+        df_ventas_todas["fecha_sola"] = pd.to_datetime(df_ventas_todas["fecha_hora"]).dt.strftime("%Y-%m-%d")
+        df_ventas_dia = df_ventas_todas[df_ventas_todas["fecha_sola"] == fecha_str]
+    else:
+        df_ventas_dia = pd.DataFrame()
 
-    # 2. Ventas en YAPE / PLIN exclusivamente de la fecha seleccionada
-    query_ing_yape = f"""
-        SELECT COALESCE(SUM(monto_yape), 0) AS total_yape 
-        FROM ventas 
-        WHERE SUBSTRING(fecha_hora::text, 1, 10) = '{fecha_str}'
-    """
-    df_iy = conn.query(query_ing_yape, ttl=0)
-    venta_yape_dia = df_iy.loc[0, "total_yape"]
+    venta_efectivo_dia = df_ventas_dia["monto_efectivo"].sum() if not df_ventas_dia.empty and "monto_efectivo" in df_ventas_dia.columns else 0.0
+    venta_yape_dia = df_ventas_dia["monto_yape"].sum() if not df_ventas_dia.empty and "monto_yape" in df_ventas_dia.columns else 0.0
 
-    # 3. Gastos en EFECTIVO exclusivamente de la fecha seleccionada
-    query_gast_efectivo = f"""
-        SELECT COALESCE(SUM(monto), 0) AS gasto_efectivo 
-        FROM gastos 
-        WHERE SUBSTRING(fecha_hora::text, 1, 10) = '{fecha_str}' AND metodo_pago = 'Efectivo'
-    """
-    df_ge = conn.query(query_gast_efectivo, ttl=0)
-    gasto_efectivo_dia = df_ge.loc[0, "gasto_efectivo"]
+    # 2. Obtenemos todos los gastos y filtramos localmente por fecha
+    df_gastos_todos = conn.query("SELECT * FROM gastos", ttl=0)
+    if not df_gastos_todos.empty:
+        df_gastos_todos["fecha_sola"] = pd.to_datetime(df_gastos_todos["fecha_hora"]).dt.strftime("%Y-%m-%d")
+        df_gastos_dia = df_gastos_todos[df_gastos_todos["fecha_sola"] == fecha_str]
+    else:
+        df_gastos_dia = pd.DataFrame()
 
-    # 4. Gastos en YAPE / PLIN exclusivamente de la fecha seleccionada
-    query_gast_yape = f"""
-        SELECT COALESCE(SUM(monto), 0) AS gasto_yape 
-        FROM gastos 
-        WHERE SUBSTRING(fecha_hora::text, 1, 10) = '{fecha_str}' AND metodo_pago = 'Yape / Plin'
-    """
-    df_gy = conn.query(query_gast_yape, ttl=0)
-    gasto_yape_dia = df_gy.loc[0, "gasto_yape"]
+    gasto_efectivo_dia = df_gastos_dia[df_gastos_dia["metodo_pago"] == "Efectivo"]["monto"].sum() if not df_gastos_dia.empty and "metodo_pago" in df_gastos_dia.columns else 0.0
+    gasto_yape_dia = df_gastos_dia[df_gastos_dia["metodo_pago"] == "Yape / Plin"]["monto"].sum() if not df_gastos_dia.empty and "metodo_pago" in df_gastos_dia.columns else 0.0
 
-    # 5. Cálculo de Ganancias independientes del día (Ingresos menos Gastos)
+    # 3. Cálculo de Ganancias independientes del día (Ingresos menos Gastos)
     ganancia_efectivo = venta_efectivo_dia - gasto_efectivo_dia
     ganancia_yape = venta_yape_dia - gasto_yape_dia
 
@@ -618,30 +605,36 @@ elif menu == "Resumen Diario":
     st.divider()
 
     # HISTORIAL DE MOVIMIENTOS EXCLUSIVOS DE LA FECHA SELECCIONADA
-    query_v_hist = f"""
-        SELECT fecha_hora, 'INGRESO (Venta)' AS tipo, metodo_pago, total AS monto, 
-               CONCAT('Efectivo: S/ ', monto_efectivo, ' | Yape/Plin: S/ ', monto_yape) AS detalle
-        FROM ventas 
-        WHERE SUBSTRING(fecha_hora::text, 1, 10) = '{fecha_str}'
-    """
-    df_v_h = conn.query(query_v_hist, ttl=0)
+    lista_movimientos = []
+    
+    if not df_ventas_dia.empty:
+        for _, row in df_ventas_dia.iterrows():
+            lista_movimientos.append({
+                "fecha_hora": row["fecha_hora"],
+                "tipo": "INGRESO (Venta)",
+                "metodo_pago": row["metodo_pago"],
+                "monto": row["total"],
+                "detalle": f"Efectivo: S/ {row['monto_efectivo']} | Yape/Plin: S/ {row['monto_yape']}"
+            })
+            
+    if not df_gastos_dia.empty:
+        for _, row in df_gastos_dia.iterrows():
+            lista_movimientos.append({
+                "fecha_hora": row["fecha_hora"],
+                "tipo": f"GASTO ({row['categoria']})",
+                "metodo_pago": row["metodo_pago"],
+                "monto": row["monto"],
+                "detalle": row["anotacion"] if pd.notna(row["anotacion"]) else ""
+            })
 
-    query_g_hist = f"""
-        SELECT fecha_hora, CONCAT('GASTO (', categoria, ')') AS tipo, metodo_pago, monto, 
-               COALESCE(anotacion, '') AS detalle
-        FROM gastos 
-        WHERE SUBSTRING(fecha_hora::text, 1, 10) = '{fecha_str}'
-    """
-    df_g_h = conn.query(query_g_hist, ttl=0)
-
-    df_resumen_combinado = pd.concat([df_v_h, df_g_h], ignore_index=True)
+    df_resumen_combinado = pd.DataFrame(lista_movimientos)
+    
+    st.subheader(f"📥 Movimientos Registrados el {fecha_str}")
     if not df_resumen_combinado.empty:
         df_resumen_combinado["fecha_hora"] = pd.to_datetime(df_resumen_combinado["fecha_hora"])
         df_resumen_combinado = df_resumen_combinado.sort_values(by="fecha_hora", ascending=False)
-
-    st.subheader(f"📥 Movimientos Registrados el {fecha_str}")
-    if not df_resumen_combinado.empty:
         st.dataframe(df_resumen_combinado, use_container_width=True)
+        
         csv_resumen = df_resumen_combinado.to_csv(index=False).encode("utf-8")
         st.download_button(
             label=f"📥 Descargar Resumen del Día - {fecha_str} (CSV)",
