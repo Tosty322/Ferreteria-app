@@ -1,7 +1,12 @@
-from datetime import datetime
+from datetime import datetime, timedelta
 import pandas as pd
 import streamlit as st
 from sqlalchemy import create_engine, text
+
+# --- FUNCIÓN PARA OBTENER LA HORA DE PERÚ (GMT-5) ---
+def obtener_hora_peru():
+    # Resta 5 horas a la hora UTC del servidor para adaptarla a la hora local de Perú
+    return datetime.utcnow() - timedelta(hours=5)
 
 # --- CONEXIÓN A SUPABASE ---
 def conectar_db():
@@ -229,7 +234,7 @@ elif menu == "Registrar Producto":
 # 4. MODIFICAR DATOS DEL PRODUCTO
 # -------------------------------------------------------------
 elif menu == "Modificar Datos del Producto":
-    st.header("✏️️ Modificar Datos, Categoría o Proveedor de Producto")
+    st.header("✏️ Modificar Datos, Categoría o Proveedor de Producto")
     conn = conectar_db()
     
     df_prov = conn.query("SELECT id, nombre FROM proveedores", ttl=0)
@@ -331,7 +336,7 @@ elif menu == "Productos Faltantes":
         if btn_guardar_faltante:
             if nombre_faltante and persona_apunto:
                 try:
-                    fecha_ahora = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                    fecha_ahora = obtener_hora_peru().strftime("%Y-%m-%d %H:%M:%S")
                     with conn.session as s:
                         s.execute(
                             text("""
@@ -406,7 +411,7 @@ elif menu == "Control de Gastos":
         if btn_guardar_gasto:
             if monto_gasto > 0 and registrado_por:
                 try:
-                    fecha_ahora = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                    fecha_ahora = obtener_hora_peru().strftime("%Y-%m-%d %H:%M:%S")
                     with conn.session as s:
                         s.execute(
                             text("""
@@ -454,11 +459,10 @@ elif menu == "Modificar / Eliminar Gastos":
     
     col_fg1, col_fg2 = st.columns(2)
     with col_fg1:
-        fecha_filtro_gasto = st.date_input("📅 Filtrar gastos por fecha:", datetime.now())
+        fecha_filtro_gasto = st.date_input("📅 Filtrar gastos por fecha:", obtener_hora_peru())
     
     fecha_g_str = fecha_filtro_gasto.strftime("%Y-%m-%d")
     
-    # Traemos todos los gastos y filtramos localmente con pandas
     df_g_todos = conn.query("SELECT id, fecha_hora, categoria, monto, metodo_pago, anotacion, registrado_por FROM gastos ORDER BY fecha_hora DESC", ttl=0)
     
     if not df_g_todos.empty:
@@ -555,11 +559,11 @@ elif menu == "Resumen Diario":
     
     col_f1, _ = st.columns(2)
     with col_f1:
-        fecha_resumen = st.date_input("📅 Selecciona la fecha para consultar el resumen:", datetime.now())
+        fecha_resumen = st.date_input("📅 Selecciona la fecha para consultar el resumen:", obtener_hora_peru())
     
     fecha_str = fecha_resumen.strftime("%Y-%m-%d")
     
-    # 1. Obtenemos todas las ventas y filtramos localmente por fecha
+    # 1. Ventas filtradas por fecha local
     df_ventas_todas = conn.query("SELECT * FROM ventas", ttl=0)
     if not df_ventas_todas.empty:
         df_ventas_todas["fecha_sola"] = pd.to_datetime(df_ventas_todas["fecha_hora"]).dt.strftime("%Y-%m-%d")
@@ -570,7 +574,7 @@ elif menu == "Resumen Diario":
     venta_efectivo_dia = df_ventas_dia["monto_efectivo"].sum() if not df_ventas_dia.empty and "monto_efectivo" in df_ventas_dia.columns else 0.0
     venta_yape_dia = df_ventas_dia["monto_yape"].sum() if not df_ventas_dia.empty and "monto_yape" in df_ventas_dia.columns else 0.0
 
-    # 2. Obtenemos todos los gastos y filtramos localmente por fecha
+    # 2. Gastos filtrados por fecha local
     df_gastos_todos = conn.query("SELECT * FROM gastos", ttl=0)
     if not df_gastos_todos.empty:
         df_gastos_todos["fecha_sola"] = pd.to_datetime(df_gastos_todos["fecha_hora"]).dt.strftime("%Y-%m-%d")
@@ -682,7 +686,7 @@ elif menu == "Registrar Compra / Reposición":
                     st.write(f"**Costo Total de la Compra:** S/ {(cantidad_a_comprar * nuevo_precio_compra):,.5f}")
                 btn_guardar_compra = st.form_submit_button("➕ Registrar Compra y Actualizar Inventario")
                 if btn_guardar_compra:
-                    fecha_ahora = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                    fecha_ahora = obtener_hora_peru().strftime("%Y-%m-%d %H:%M:%S")
                     nuevo_stock_total = stock_actual + cantidad_a_comprar
                     costo_total_compra = cantidad_a_comprar * nuevo_precio_compra
                     with conn.session as s:
@@ -736,7 +740,7 @@ elif menu == "Historial de Compras":
         st.download_button(
             label="📥 Descargar Historial de Compras en CSV",
             data=csv_compras,
-            file_name=f"historial_compras_{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}.csv",
+            file_name=f"historial_compras_{obtener_hora_peru().strftime('%Y-%m-%d_%H-%M-%S')}.csv",
             mime="text/csv",
         )
 
@@ -760,7 +764,7 @@ elif menu == "Actualizar Precios":
             nuevo_precio = st.number_input("Nuevo Precio de Venta (S/)", min_value=0.0, value=float(precio_actual), step=0.00001, format="%.5f")
             if st.button("Guardar Nuevo Precio"):
                 if nuevo_precio != precio_actual:
-                    fecha_ahora = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                    fecha_ahora = obtener_hora_peru().strftime("%Y-%m-%d %H:%M:%S")
                     with conn.session as s:
                         s.execute(
                             text("""
@@ -867,7 +871,7 @@ elif menu == "Registrar Venta (POS)":
             with col_btn1:
                 if st.button("✅ Confirmar y Registrar Venta (Generar Boleta)"):
                     try:
-                        fecha_venta = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                        fecha_venta = obtener_hora_peru().strftime("%Y-%m-%d %H:%M:%S")
                         with conn.session as s:
                             res = s.execute(
                                 text("""
@@ -933,7 +937,7 @@ elif menu == "Historial de Ventas":
         st.download_button(
             label="📥 Descargar Historial Detallado en Excel (CSV)",
             data=csv_data,
-            file_name=f"historial_ventas_boletas_{datetime.now().strftime('%Y-%m-%d')}.csv",
+            file_name=f"historial_ventas_boletas_{obtener_hora_peru().strftime('%Y-%m-%d')}.csv",
             mime="text/csv",
         )
 
