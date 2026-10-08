@@ -35,7 +35,6 @@ CATEGORIAS_GASTOS = [
 
 # --- MENÚ LATERAL DIVIDIDO EN DOS BLOQUES VERTICALES ---
 st.sidebar.title("Menú de Navegación")
-
 st.sidebar.markdown("### 📋 Operaciones Diarias")
 menu_diarias = st.sidebar.radio(
     "Seleccione operación diaria:",
@@ -52,7 +51,6 @@ menu_diarias = st.sidebar.radio(
 )
 
 st.sidebar.markdown("---")
-
 st.sidebar.markdown("### 📦 Gestión de Inventario y Proveedores")
 menu_gestion = st.sidebar.radio(
     "Seleccione gestión:",
@@ -315,7 +313,7 @@ elif menu == "Modificar Datos del Producto":
                         st.warning("El código y el nombre no pueden estar vacíos.")
 
 # -------------------------------------------------------------
-# 5. PRODUCTOS FALTANTES
+# 5. PRODUCTOS FALTANTES (ACTUALIZADO CON PRIORIDAD Y FILTRO)
 # -------------------------------------------------------------
 elif menu == "Productos Faltantes":
     st.header("📝 Apuntar y Gestionar Productos Faltantes")
@@ -331,6 +329,7 @@ elif menu == "Productos Faltantes":
         with col_f2:
             persona_apunto = st.text_input("Tu nombre (¿Quién anota este faltante?)")
             motivo_falta = st.text_input("Motivo (Ej: Se agotó, cliente pidió más)")
+            prioridad_faltante = st.slider("Prioridad (1 = Baja, 5 = Urgente)", min_value=1, max_value=5, value=3)
             
         btn_guardar_faltante = st.form_submit_button("📌 Guardar en la Lista de Faltantes")
         if btn_guardar_faltante:
@@ -340,10 +339,10 @@ elif menu == "Productos Faltantes":
                     with conn.session as s:
                         s.execute(
                             text("""
-                                INSERT INTO productos_faltantes (nombre_producto, cantidad_sugerida, motivo, apuntado_por, fecha_hora, categoria)
-                                VALUES (:nom, :cant, :mot, :per, :f_h, :cat)
+                                INSERT INTO productos_faltantes (nombre_producto, cantidad_sugerida, motivo, apuntado_por, fecha_hora, categoria, prioridad)
+                                VALUES (:nom, :cant, :mot, :per, :f_h, :cat, :prio)
                             """),
-                            dict(nom=nombre_faltante, cant=cantidad_sug, mot=motivo_falta, per=persona_apunto, f_h=fecha_ahora, cat=cat_faltante),
+                            dict(nom=nombre_faltante, cant=cantidad_sug, mot=motivo_falta, per=persona_apunto, f_h=fecha_ahora, cat=cat_faltante, prio=int(prioridad_faltante)),
                         )
                         s.commit()
                     st.success(f"✅ '{nombre_faltante}' fue agregado a la lista de faltantes correctamente.")
@@ -356,22 +355,28 @@ elif menu == "Productos Faltantes":
     st.divider()
     st.subheader("📋 Lista Actual de Productos Faltantes")
     
-    cat_filtro_faltantes = st.selectbox("📂 Filtrar lista por categoría:", ["Todas las Categorías"] + CATEGORIAS_DISPONIBLES, key="filtro_f")
-    query_faltantes = "SELECT * FROM productos_faltantes"
+    col_filt_1, col_filt_2 = st.columns(2)
+    with col_filt_1:
+        cat_filtro_faltantes = st.selectbox("📂 Filtrar lista por categoría:", ["Todas las Categorías"] + CATEGORIAS_DISPONIBLES, key="filtro_f")
+    with col_filt_2:
+        filtro_prioridad = st.slider("🔍 Filtrar por Prioridad mínima:", min_value=1, max_value=5, value=1, key="slider_filtro_prio")
+
+    query_faltantes = "SELECT * FROM productos_faltantes WHERE 1=1"
     if cat_filtro_faltantes != "Todas las Categorías":
-        query_faltantes += f" WHERE categoria = '{cat_filtro_faltantes}'"
-    query_faltantes += " ORDER BY fecha_hora DESC"
+        query_faltantes += f" AND categoria = '{cat_filtro_faltantes}'"
+    query_faltantes += f" AND prioridad >= {filtro_prioridad}"
+    query_faltantes += " ORDER BY prioridad DESC, fecha_hora DESC"
     
     df_faltantes = conn.query(query_faltantes, ttl=0)
     
     if df_faltantes.empty:
-        st.info("🎉 ¡Excelente noticia! No hay ningún producto faltante anotado con este filtro.")
+        st.info("🎉 ¡Excelente noticia! No hay ningún producto faltante anotado con este filtro de prioridad.")
     else:
         st.dataframe(df_faltantes, use_container_width=True)
         st.markdown("---")
         st.subheader("🗑 Marcar como Solucionado / Eliminar Faltante")
         df_faltantes["opcion_eliminar_faltante"] = (
-            "[" + df_faltantes["fecha_hora"].astype(str) + "] " + df_faltantes["nombre_producto"] + " (" + df_faltantes["categoria"].fillna("Sin categoría") + ") - Apuntado por: " + df_faltantes["apuntado_por"]
+            "[" + df_faltantes["fecha_hora"].astype(str) + "] " + df_faltantes["nombre_producto"] + " (Prio: " + df_faltantes["prioridad"].astype(str) + ") - " + df_faltantes["apuntado_por"]
         )
         faltante_a_borrar = st.selectbox(
             "Selecciona el faltante que ya compraste o deseas quitar de la lista:",
@@ -563,33 +568,27 @@ elif menu == "Resumen Diario":
     
     fecha_str = fecha_resumen.strftime("%Y-%m-%d")
     
-    # 1. Ventas filtradas por fecha local
     df_ventas_todas = conn.query("SELECT * FROM ventas", ttl=0)
     if not df_ventas_todas.empty:
         df_ventas_todas["fecha_sola"] = pd.to_datetime(df_ventas_todas["fecha_hora"]).dt.strftime("%Y-%m-%d")
         df_ventas_dia = df_ventas_todas[df_ventas_todas["fecha_sola"] == fecha_str]
     else:
         df_ventas_dia = pd.DataFrame()
-
     venta_efectivo_dia = df_ventas_dia["monto_efectivo"].sum() if not df_ventas_dia.empty and "monto_efectivo" in df_ventas_dia.columns else 0.0
     venta_yape_dia = df_ventas_dia["monto_yape"].sum() if not df_ventas_dia.empty and "monto_yape" in df_ventas_dia.columns else 0.0
-
-    # 2. Gastos filtrados por fecha local
+    
     df_gastos_todos = conn.query("SELECT * FROM gastos", ttl=0)
     if not df_gastos_todos.empty:
         df_gastos_todos["fecha_sola"] = pd.to_datetime(df_gastos_todos["fecha_hora"]).dt.strftime("%Y-%m-%d")
         df_gastos_dia = df_gastos_todos[df_gastos_todos["fecha_sola"] == fecha_str]
     else:
         df_gastos_dia = pd.DataFrame()
-
     gasto_efectivo_dia = df_gastos_dia[df_gastos_dia["metodo_pago"] == "Efectivo"]["monto"].sum() if not df_gastos_dia.empty and "metodo_pago" in df_gastos_dia.columns else 0.0
     gasto_yape_dia = df_gastos_dia[df_gastos_dia["metodo_pago"] == "Yape / Plin"]["monto"].sum() if not df_gastos_dia.empty and "metodo_pago" in df_gastos_dia.columns else 0.0
-
-    # 3. Cálculo de Ganancias independientes del día (Ingresos menos Gastos)
+    
     ganancia_efectivo = venta_efectivo_dia - gasto_efectivo_dia
     ganancia_yape = venta_yape_dia - gasto_yape_dia
-
-    # PRESENTACIÓN EN MÉTRICAS
+    
     st.subheader(f"📅 Reporte para la fecha: {fecha_str}")
     
     st.markdown("### 💵 Balance en Efectivo")
@@ -597,20 +596,15 @@ elif menu == "Resumen Diario":
     col_1.metric("📥 Vendido en Efectivo", f"S/ {venta_efectivo_dia:,.5f}")
     col_2.metric("📤 Gastado en Efectivo", f"S/ {gasto_efectivo_dia:,.5f}")
     col_3.metric("🪙 Ganancia Neta Efectivo", f"S/ {ganancia_efectivo:,.5f}")
-
     st.markdown("---")
-
     st.markdown("### 📱 Balance en Yape / Plin")
     col_4, col_5, col_6 = st.columns(3)
     col_4.metric("📥 Vendido en Yape / Plin", f"S/ {venta_yape_dia:,.5f}")
     col_5.metric("📤 Gastado en Yape / Plin", f"S/ {gasto_yape_dia:,.5f}")
     col_6.metric("📱 Ganancia Neta Yape / Plin", f"S/ {ganancia_yape:,.5f}")
-
     st.divider()
-
-    # HISTORIAL DE MOVIMIENTOS EXCLUSIVOS DE LA FECHA SELECCIONADA
-    lista_movimientos = []
     
+    lista_movimientos = []
     if not df_ventas_dia.empty:
         for _, row in df_ventas_dia.iterrows():
             lista_movimientos.append({
@@ -630,7 +624,6 @@ elif menu == "Resumen Diario":
                 "monto": row["monto"],
                 "detalle": row["anotacion"] if pd.notna(row["anotacion"]) else ""
             })
-
     df_resumen_combinado = pd.DataFrame(lista_movimientos)
     
     st.subheader(f"📥 Movimientos Registrados el {fecha_str}")
