@@ -44,6 +44,7 @@ menu_diarias = st.sidebar.radio(
         "Modificar / Eliminar Gastos",
         "Resumen Diario",
         "Productos Faltantes",
+        "Devoluciones",
         "Historial de Ventas",
     ],
     label_visibility="collapsed"
@@ -422,7 +423,132 @@ elif menu == "Productos Faltantes":
                 st.error(f"❌ Error al eliminar el registro: {e}")
 
 # -------------------------------------------------------------
-# 6. CONTROL DE GASTOS
+# 6. DEVOLUCIONES
+# -------------------------------------------------------------
+elif menu == "Devoluciones":
+    st.header("🔄 Gestión y Registro de Devoluciones")
+    conn = conectar_db()
+    
+    busqueda_venta = st.text_input("🔍 Buscar venta por ID de boleta (Ej: 1, 2, 3...):")
+    
+    if busqueda_venta:
+        try:
+            venta_id_busq = int(busqueda_venta)
+            query_venta = text("SELECT * FROM ventas WHERE id = :v_id")
+            df_v_encontrada = conn.query(query_venta, params={"v_id": venta_id_busq}, ttl=0)
+        except ValueError:
+            df_v_encontrada = pd.DataFrame()
+    else:
+        df_v_encontrada = conn.query("SELECT * FROM ventas ORDER BY id DESC LIMIT 10", ttl=0)
+        
+    if df_v_encontrada.empty:
+        st.info("No se encontró la venta especificada.")
+    else:
+        if not busqueda_venta:
+            st.caption("Mostrando las últimas ventas registradas. Usa el buscador superior para buscar un ID específico.")
+        
+        df_v_encontrada["opcion_v"] = "Boleta ID #" + df_v_encontrada["id"].astype(str) + " - Fecha: " + df_v_encontrada["fecha_hora"].astype(str) + " - Total: S/ " + df_v_encontrada["total"].map('{:,.2f}'.format)
+        venta_seleccionada = st.selectbox("Selecciona la venta a devolver:", df_v_encontrada["opcion_v"])
+        
+        if venta_seleccionada:
+            idx_v = df_v_encontrada[df_v_encontrada["opcion_v"] == venta_seleccionada].index[0]
+            id_venta_sel = int(df_v_encontrada.loc[idx_v, "id"])
+            
+            query_detalle = text("""
+                SELECT dv.id AS detalle_id, dv.producto_id, p.nombre AS producto, dv.cantidad, dv.precio_unitario, dv.subtotal, p.unidad_medida
+                FROM detalle_ventas dv
+                JOIN productos p ON dv.producto_id = p.id
+                WHERE dv.venta_id = :v_id
+            """)
+            df_detalle = conn.query(query_detalle, params={"v_id": id_venta_sel}, ttl=0)
+            
+            if df_detalle.empty:
+                st.warning("Esta venta no tiene detalles de productos registrados.")
+            else:
+                st.subheader(f"📦 Productos de la Venta ID #{id_venta_sel}")
+                st.dataframe(df_detalle[["producto", "cantidad", "unidad_medida", "precio_unitario", "subtotal"]], use_container_width=True)
+                
+                with st.form(f"form_devolucion_{id_venta_sel}"):
+                    st.subheader("➕ Registrar Devolución")
+                    
+                    df_detalle["opcion_prod"] = df_detalle["producto"] + " (Comprado: " + df_detalle["cantidad"].astype(str) + " " + df_detalle["unidad_medida"] + ")"
+                    prod_dev_elegido = st.selectbox("Selecciona el producto a devolver:", df_detalle["opcion_prod"])
+                    
+                    idx_d = df_detalle[df_detalle["opcion_prod"] == prod_dev_elegido].index[0]
+                    prod_id = int(df_detalle.loc[idx_d, "producto_id"])
+                    cant_comprada = float(df_detalle.loc[idx_d, "cantidad"])
+                    precio_u = float(df_detalle.loc[idx_d, "precio_unitario"])
+                    
+                    cantidad_a_devolver = st.number_input(
+                        "Cantidad a devolver", 
+                        min_value=0.00001, 
+                        max_value=cant_comprada, 
+                        value=cant_comprada, 
+                        step=0.00001, 
+                        format="%.5f"
+                    )
+                    
+                    motivo_devolucion = st.text_input("Motivo de la devolución (Ej: Producto defectuoso, error de medida)")
+                    registrado_por = st.text_input("Registrado por (Tu nombre)")
+                    
+                    btn_procesar_dev = st.form_submit_button("🔄 Procesar Devolución y Reponer Stock")
+                    
+                    if btn_procesar_dev:
+                        if motivo_devolucion and registrado_por:
+                            try:
+                                fecha_ahora = obtener_hora_peru().strftime("%Y-%m-%d %H:%M:%S")
+                                monto_reembolso = cantidad_a_devolver * precio_u
+                                
+                                with conn.session as s:
+                                    s.execute(text("""
+                                        CREATE TABLE IF NOT EXISTS devoluciones (
+                                            id SERIAL PRIMARY KEY,
+                                            venta_id INTEGER,
+                                            producto_id INTEGER,
+                                            cantidad NUMERIC(15,5),
+                                            monto_reembolso NUMERIC(15,5),
+                                            motivo TEXT,
+                                            registrado_por TEXT,
+                                            fecha_hora TIMESTAMP
+                                        )
+                                    """))
+                                    
+                                    s.execute(
+                                        text("""
+                                            INSERT INTO devoluciones (venta_id, producto_id, cantidad, monto_reembolso, motivo, registrado_por, fecha_hora)
+                                            VALUES (:v_id, :p_id, :cant, :monto, :mot, :reg, :f_h)
+                                        """),
+                                        dict(
+                                            v_id=id_venta_sel, 
+                                            p_id=prod_id, 
+                                            cant=float(cantidad_a_devolver), 
+                                            monto=float(monto_reembolso), 
+                                            mot=motivo_devolucion, 
+                                            reg=registrado_por, 
+                                            f_h=fecha_ahora
+                                        )
+                                    )
+                                    
+                                    s.execute(
+                                        text("""
+                                            UPDATE productos 
+                                            SET stock = stock + :cant 
+                                            WHERE id = :p_id
+                                        """),
+                                        dict(cant=float(cantidad_a_devolver), p_id=prod_id)
+                                    )
+                                    
+                                    s.commit()
+                                    
+                                st.success(f"✅ ¡Devolución registrada con éxito! Se sumaron {cantidad_a_devolver:,.5f} unidades de vuelta al stock.")
+                                st.rerun()
+                            except Exception as e:
+                                st.error(f"❌ Error al procesar la devolución: {e}")
+                        else:
+                            st.warning("⚠️ Por favor, ingresa el motivo y quién registra la devolución.")
+
+# -------------------------------------------------------------
+# 7. CONTROL DE GASTOS
 # -------------------------------------------------------------
 elif menu == "Control de Gastos":
     st.header("💸 Control y Registro de Gastos")
@@ -483,7 +609,7 @@ elif menu == "Control de Gastos":
         st.dataframe(df_gastos, use_container_width=True)
 
 # -------------------------------------------------------------
-# 6.1 MODIFICAR / ELIMINAR GASTOS
+# 7.1 MODIFICAR / ELIMINAR GASTOS
 # -------------------------------------------------------------
 elif menu == "Modificar / Eliminar Gastos":
     st.header("✏️ Modificar o Eliminar Gastos Registrados")
@@ -583,7 +709,7 @@ elif menu == "Modificar / Eliminar Gastos":
                         st.error(f"❌ Error al eliminar el gasto: {e}")
 
 # -------------------------------------------------------------
-# 7. RESUMEN DIARIO
+# 8. RESUMEN DIARIO
 # -------------------------------------------------------------
 elif menu == "Resumen Diario":
     st.header("📊 Resumen Diario y Balance Independiente")
@@ -670,7 +796,7 @@ elif menu == "Resumen Diario":
         st.info(f"No hay movimientos registrados para la fecha seleccionada ({fecha_str}). Cada día comienza limpio de manera independiente.")
 
 # -------------------------------------------------------------
-# 8. REGISTRAR COMPRA / REPOSICIÓN
+# 9. REGISTRAR COMPRA / REPOSICIÓN
 # -------------------------------------------------------------
 elif menu == "Registrar Compra / Reposición":
     st.header("📥 Registrar Compra (Aumentar Stock y Actualizar Costos)")
@@ -738,7 +864,7 @@ elif menu == "Registrar Compra / Reposición":
                     st.rerun()
 
 # -------------------------------------------------------------
-# 9. HISTORIAL DE COMPRAS
+# 10. HISTORIAL DE COMPRAS
 # -------------------------------------------------------------
 elif menu == "Historial de Compras":
     st.header("📋 Historial de Compras y Reposiciones")
@@ -765,7 +891,7 @@ elif menu == "Historial de Compras":
         )
 
 # -------------------------------------------------------------
-# 10. ACTUALIZAR PRECIOS
+# 11. ACTUALIZAR PRECIOS
 # -------------------------------------------------------------
 elif menu == "Actualizar Precios":
     st.header("🔄 Actualizar Precios Independiente")
@@ -801,7 +927,7 @@ elif menu == "Actualizar Precios":
                     st.info("El nuevo precio es idéntico al actual.")
 
 # -------------------------------------------------------------
-# 11. HISTORIAL DE PRECIOS
+# 12. HISTORIAL DE PRECIOS
 # -------------------------------------------------------------
 elif menu == "Historial de Precios":
     st.header("📈 Historial de Cambios de Precios")
@@ -819,7 +945,7 @@ elif menu == "Historial de Precios":
         st.dataframe(df_historial, use_container_width=True)
 
 # -------------------------------------------------------------
-# 12. REGISTRAR VENTA (POS)
+# 13. REGISTRAR VENTA (POS)
 # -------------------------------------------------------------
 elif menu == "Registrar Venta (POS)":
     st.header("🛒 Caja / Punto de Venta")
@@ -827,7 +953,7 @@ elif menu == "Registrar Venta (POS)":
     filtro_pos = st.text_input("🔍 Escribe para filtrar producto (ej: 'cemento', 'clavo'):")
     query_pos = "SELECT id, codigo_interno, nombre, stock, precio_venta, unidad_medida FROM productos"
     if filtro_pos:
-        query_pos += f" WHERE nombre ILIKE '%{filtro_pos}%' OR codigo_interno ILIKE '%{filtro_pos}%'"
+        query_pos += f" WHERE nombre ILIKE '%{filtro_pos}%' OR codigo_interno ILIKE '%{busqueda_inv}%'"
     df_productos = conn.query(query_pos, ttl=0)
     if df_productos.empty:
         st.warning("No se encontró ningún producto registrado.")
@@ -933,7 +1059,7 @@ elif menu == "Registrar Venta (POS)":
                     st.rerun()
 
 # -------------------------------------------------------------
-# 13. HISTORIAL DE VENTAS
+# 14. HISTORIAL DE VENTAS
 # -------------------------------------------------------------
 elif menu == "Historial de Ventas":
     st.header("📊 Historial de Ventas y Boletas Detallado")
@@ -962,7 +1088,7 @@ elif menu == "Historial de Ventas":
         )
 
 # -------------------------------------------------------------
-# 14. ELIMINAR PRODUCTO
+# 15. ELIMINAR PRODUCTO
 # -------------------------------------------------------------
 elif menu == "Eliminar Producto":
     st.header("🗑️ Eliminar Producto del Inventario")
