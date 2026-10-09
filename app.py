@@ -137,17 +137,10 @@ if menu == "Inventario Actual":
     df_productos = conn.query(query, ttl=0)
     
     if not df_productos.empty:
-        # Calcular el porcentaje respecto al stock ideal para filtrar dinámicamente o mostrar
-        # Evitamos división por cero si stock_ideal es 0 o nulo
         df_productos["stock_ideal"] = df_productos["stock_ideal"].fillna(0)
-        
-        # Aplicar el filtro por porcentaje basado en stock_ideal (solo si stock_ideal > 0)
-        # Si stock_ideal es 0, no se descarta a menos que el usuario filtre estrictamente, pero aquí evaluamos proporción
         df_productos["% del Stock Ideal"] = df_productos.apply(
             lambda row: (row["stock"] / row["stock_ideal"] * 100) if row["stock_ideal"] > 0 else 999.0, axis=1
         )
-        
-        # Filtrar según el slider (si el producto tiene stock ideal definido)
         df_productos = df_productos[
             (df_productos["stock_ideal"] == 0) | (df_productos["% del Stock Ideal"] <= porcentaje_filtro)
         ]
@@ -434,8 +427,8 @@ elif menu == "Devoluciones":
     if busqueda_venta:
         try:
             venta_id_busq = int(busqueda_venta)
-            query_venta = text("SELECT * FROM ventas WHERE id = :v_id")
-            df_v_encontrada = conn.query(query_venta, params={"v_id": venta_id_busq}, ttl=0)
+            query_venta = f"SELECT * FROM ventas WHERE id = {venta_id_busq}"
+            df_v_encontrada = conn.query(query_venta, ttl=0)
         except ValueError:
             df_v_encontrada = pd.DataFrame()
     else:
@@ -454,13 +447,13 @@ elif menu == "Devoluciones":
             idx_v = df_v_encontrada[df_v_encontrada["opcion_v"] == venta_seleccionada].index[0]
             id_venta_sel = int(df_v_encontrada.loc[idx_v, "id"])
             
-            query_detalle = text("""
+            query_detalle = f"""
                 SELECT dv.id AS detalle_id, dv.producto_id, p.nombre AS producto, dv.cantidad, dv.precio_unitario, dv.subtotal, p.unidad_medida
                 FROM detalle_ventas dv
                 JOIN productos p ON dv.producto_id = p.id
-                WHERE dv.venta_id = :v_id
-            """)
-            df_detalle = conn.query(query_detalle, params={"v_id": id_venta_sel}, ttl=0)
+                WHERE dv.venta_id = {id_venta_sel}
+            """
+            df_detalle = conn.query(query_detalle, ttl=0)
             
             if df_detalle.empty:
                 st.warning("Esta venta no tiene detalles de productos registrados.")
@@ -953,7 +946,7 @@ elif menu == "Registrar Venta (POS)":
     filtro_pos = st.text_input("🔍 Escribe para filtrar producto (ej: 'cemento', 'clavo'):")
     query_pos = "SELECT id, codigo_interno, nombre, stock, precio_venta, unidad_medida FROM productos"
     if filtro_pos:
-        query_pos += f" WHERE nombre ILIKE '%{filtro_pos}%' OR codigo_interno ILIKE '%{busqueda_inv}%'"
+        query_pos += f" WHERE nombre ILIKE '%{filtro_pos}%' OR codigo_interno ILIKE '%{filtro_pos}%'"
     df_productos = conn.query(query_pos, ttl=0)
     if df_productos.empty:
         st.warning("No se encontró ningún producto registrado.")
