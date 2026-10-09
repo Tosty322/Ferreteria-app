@@ -77,7 +77,7 @@ else:
     menu = "Inventario Actual"
 
 # -------------------------------------------------------------
-# 1. INVENTARIO ACTUAL (CON FILTRO DE PORCENTAJE DE STOCK IDEAL)
+# 1. INVENTARIO ACTUAL
 # -------------------------------------------------------------
 if menu == "Inventario Actual":
     conn = conectar_db()
@@ -110,12 +110,11 @@ if menu == "Inventario Actual":
         
     busqueda_inv = st.text_input("🔍 Buscar producto por nombre o código en el inventario:")
     
-    # Barra deslizante para filtrar por porcentaje del Stock Ideal
     st.markdown("### ⚠️ Filtro de Alerta por Stock Ideal")
     porcentaje_filtro = st.slider(
         "Mostrar productos cuyo stock actual sea igual o menor a este % de su Stock Ideal:",
         min_value=0, max_value=200, value=100, step=5,
-        help="100% significa productos en o por debajo de su stock ideal. 50% muestra los que están a la mitad o menos de lo ideal."
+        help="100% significa productos en o por debajo de su stock ideal."
     )
     
     query = """
@@ -196,7 +195,7 @@ elif menu == "Gestión de Proveedores":
         st.dataframe(df_proveedores, use_container_width=True)
 
 # -------------------------------------------------------------
-# 3. REGISTRAR PRODUCTO (INCLUYE STOCK IDEAL)
+# 3. REGISTRAR PRODUCTO
 # -------------------------------------------------------------
 elif menu == "Registrar Producto":
     st.header("➕ Registrar Nuevo Producto")
@@ -247,7 +246,7 @@ elif menu == "Registrar Producto":
                 st.warning("Completa al menos el código y el nombre.")
 
 # -------------------------------------------------------------
-# 4. MODIFICAR DATOS DEL PRODUCTO (INCLUYE EDITAR STOCK IDEAL)
+# 4. MODIFICAR DATOS DEL PRODUCTO
 # -------------------------------------------------------------
 elif menu == "Modificar Datos del Producto":
     st.header("✏️ Modificar Datos, Categoría, Proveedor o Stock Ideal")
@@ -714,7 +713,8 @@ elif menu == "Resumen Diario":
     
     fecha_str = fecha_resumen.strftime("%Y-%m-%d")
     
-    df_ventas_todas = conn.query("SELECT * FROM ventas", ttl=0)
+    # Solo traemos las ventas que NO estén anuladas
+    df_ventas_todas = conn.query("SELECT * FROM ventas WHERE (anulada IS NULL OR anulada = FALSE)", ttl=0)
     if not df_ventas_todas.empty:
         df_ventas_todas["fecha_sola"] = pd.to_datetime(df_ventas_todas["fecha_hora"]).dt.strftime("%Y-%m-%d")
         df_ventas_dia = df_ventas_todas[df_ventas_todas["fecha_sola"] == fecha_str]
@@ -1012,10 +1012,12 @@ elif menu == "Registrar Venta (POS)":
                     try:
                         fecha_venta = obtener_hora_peru().strftime("%Y-%m-%d %H:%M:%S")
                         with conn.session as s:
+                            # Aseguramos que exista la columna anulada en la tabla ventas por si acaso
+                            s.execute(text("ALTER TABLE ventas ADD COLUMN IF NOT EXISTS anulada BOOLEAN DEFAULT FALSE"))
                             res = s.execute(
                                 text("""
-                                    INSERT INTO ventas (fecha_hora, total, metodo_pago, monto_yape, monto_efectivo)
-                                    VALUES (:f_h, :tot, :m_p, :m_y, :m_e)
+                                    INSERT INTO ventas (fecha_hora, total, metodo_pago, monto_yape, monto_efectivo, anulada)
+                                    VALUES (:f_h, :tot, :m_p, :m_y, :m_e, FALSE)
                                     RETURNING id
                                 """),
                                 dict(f_h=fecha_venta, tot=float(total_venta), m_p=metodo_pago, m_y=float(monto_yape), m_e=float(monto_efectivo)),
@@ -1052,26 +1054,35 @@ elif menu == "Registrar Venta (POS)":
                     st.rerun()
 
 # -------------------------------------------------------------
-# 14. HISTORIAL DE VENTAS
+# 14. HISTORIAL DE VENTAS (INCLUYE OPCIÓN DE ANULAR BOLETA)
 # -------------------------------------------------------------
 elif menu == "Historial de Ventas":
-    st.header("📊 Historial de Ventas y Boletas Detallado")
+    st.header("📊 Historial de Ventas y Anulación de Boletas")
     conn = conectar_db()
+    
+    # Traemos las ventas (incluso para ver cuáles están anuladas)
     query_historial_completo = """
         SELECT v.id AS n_boleta, v.fecha_hora, p.nombre AS producto, dv.cantidad, 
                p.unidad_medida, dv.precio_unitario, dv.subtotal, v.metodo_pago, 
-               v.monto_yape, v.monto_efectivo, v.total AS total_boleta
+               v.monto_yape, v.monto_efectivo, v.total AS total_boleta,
+               COALESCE(v.anulada, FALSE) AS anulada
         FROM detalle_ventas dv
         JOIN ventas v ON dv.venta_id = v.id
         JOIN productos p ON dv.producto_id = p.id
         ORDER BY v.id DESC, v.fecha_hora DESC
     """
     df_historial = conn.query(query_historial_completo, ttl=0)
+    
     if df_historial.empty:
         st.info("No hay ventas registradas todavía.")
     else:
-        df_historial["n_boleta"] = df_historial["n_boleta"].apply(lambda x: f"#{int(x):04d}")
-        st.dataframe(df_historial, use_container_width=True)
+        # Mostrar tabla de historial
+        df_mostrar = df_historial.copy()
+        df_mostrar["n_boleta_str"] = df_mostrar["n_boleta"].apply(lambda x: f"#{int(x):04d}")
+        df_mostrar["Estado"] = df_mostrar["anulada"].apply(lambda x: "❌ ANULADA" > 0 if x else "✅ Válida")
+        
+        st.dataframe(df_mostrar, use_container_width=True)
+        
         csv_data = df_historial.to_csv(index=False).encode("utf-8")
         st.download_button(
             label="📥 Descargar Historial Detallado en Excel (CSV)",
@@ -1079,6 +1090,48 @@ elif menu == "Historial de Ventas":
             file_name=f"historial_ventas_boletas_{obtener_hora_peru().strftime('%Y-%m-%d')}.csv",
             mime="text/csv",
         )
+        
+        st.divider()
+        st.subheader("⚠️ Anular Boleta / Venta")
+        st.write("Si anulas una venta, esta **desaparecerá del Resumen Diario** (descontando el dinero) y **devolverá el stock** al inventario.")
+        
+        # Seleccionar solo boletas que no estén anuladas
+        df_validas = df_historial[df_historial["anulada"] == False].drop_duplicates(subset=["n_boleta"])
+        
+        if df_validas.empty:
+            st.info("No hay boletas activas disponibles para anular.")
+        else:
+            df_validas["opcion_anular"] = "Boleta #" + df_validas["n_boleta"].astype(str).str.zfill(4) + " - Fecha: " + df_validas["fecha_hora"].astype(str) + " - Total: S/ " + df_validas["total_boleta"].map('{:,.2f}'.format)
+            boleta_elegida = st.selectbox("Selecciona la boleta que deseas anular:", df_validas["opcion_anular"])
+            
+            if boleta_elegida:
+                idx_b = df_validas[df_validas["opcion_anular"] == boleta_elegida].index[0]
+                id_boleta_anular = int(df_validas.loc[idx_b, "n_boleta"])
+                
+                if st.button("❌ Confirmar Anulación de Boleta", type="primary"):
+                    try:
+                        with conn.session as s:
+                            # 1. Marcar la venta como anulada
+                            s.execute(
+                                text("UPDATE ventas SET anulada = TRUE WHERE id = :v_id"),
+                                dict(v_id=id_boleta_anular)
+                            )
+                            
+                            # 2. Devolver el stock de todos los productos que estaban en esa boleta
+                            query_items = text("SELECT producto_id, cantidad FROM detalle_ventas WHERE venta_id = :v_id")
+                            items_venta = conn.query(f"SELECT producto_id, cantidad FROM detalle_ventas WHERE venta_id = {id_boleta_anular}", ttl=0)
+                            
+                            for _, item in items_venta.iterrows():
+                                s.execute(
+                                    text("UPDATE productos SET stock = stock + :cant WHERE id = :p_id"),
+                                    dict(cant=float(item["cantidad"]), p_id=int(item["producto_id"]))
+                                )
+                                
+                            s.commit()
+                        st.success(f"✅ ¡Boleta #{id_boleta_anular:04d} anulada con éxito! Se descontó del resumen diario y se repuso el stock.")
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"❌ Error al anular la venta: {e}")
 
 # -------------------------------------------------------------
 # 15. ELIMINAR PRODUCTO
