@@ -1012,7 +1012,6 @@ elif menu == "Registrar Venta (POS)":
                     try:
                         fecha_venta = obtener_hora_peru().strftime("%Y-%m-%d %H:%M:%S")
                         with conn.session as s:
-                            # Aseguramos que exista la columna anulada en la tabla ventas por si acaso
                             s.execute(text("ALTER TABLE ventas ADD COLUMN IF NOT EXISTS anulada BOOLEAN DEFAULT FALSE"))
                             res = s.execute(
                                 text("""
@@ -1060,7 +1059,6 @@ elif menu == "Historial de Ventas":
     st.header("📊 Historial de Ventas y Anulación de Boletas")
     conn = conectar_db()
     
-    # Traemos las ventas (incluso para ver cuáles están anuladas)
     query_historial_completo = """
         SELECT v.id AS n_boleta, v.fecha_hora, p.nombre AS producto, dv.cantidad, 
                p.unidad_medida, dv.precio_unitario, dv.subtotal, v.metodo_pago, 
@@ -1076,10 +1074,9 @@ elif menu == "Historial de Ventas":
     if df_historial.empty:
         st.info("No hay ventas registradas todavía.")
     else:
-        # Mostrar tabla de historial
         df_mostrar = df_historial.copy()
         df_mostrar["n_boleta_str"] = df_mostrar["n_boleta"].apply(lambda x: f"#{int(x):04d}")
-        df_mostrar["Estado"] = df_mostrar["anulada"].apply(lambda x: "❌ ANULADA" > 0 if x else "✅ Válida")
+        df_mostrar["Estado"] = df_mostrar["anulada"].apply(lambda x: "❌ ANULADA" if x else "✅ Válida")
         
         st.dataframe(df_mostrar, use_container_width=True)
         
@@ -1095,7 +1092,6 @@ elif menu == "Historial de Ventas":
         st.subheader("⚠️ Anular Boleta / Venta")
         st.write("Si anulas una venta, esta **desaparecerá del Resumen Diario** (descontando el dinero) y **devolverá el stock** al inventario.")
         
-        # Seleccionar solo boletas que no estén anuladas
         df_validas = df_historial[df_historial["anulada"] == False].drop_duplicates(subset=["n_boleta"])
         
         if df_validas.empty:
@@ -1111,14 +1107,11 @@ elif menu == "Historial de Ventas":
                 if st.button("❌ Confirmar Anulación de Boleta", type="primary"):
                     try:
                         with conn.session as s:
-                            # 1. Marcar la venta como anulada
                             s.execute(
                                 text("UPDATE ventas SET anulada = TRUE WHERE id = :v_id"),
                                 dict(v_id=id_boleta_anular)
                             )
                             
-                            # 2. Devolver el stock de todos los productos que estaban en esa boleta
-                            query_items = text("SELECT producto_id, cantidad FROM detalle_ventas WHERE venta_id = :v_id")
                             items_venta = conn.query(f"SELECT producto_id, cantidad FROM detalle_ventas WHERE venta_id = {id_boleta_anular}", ttl=0)
                             
                             for _, item in items_venta.iterrows():
