@@ -713,7 +713,6 @@ elif menu == "Resumen Diario":
     
     fecha_str = fecha_resumen.strftime("%Y-%m-%d")
     
-    # Solo traemos las ventas que NO estén anuladas
     df_ventas_todas = conn.query("SELECT * FROM ventas WHERE (anulada IS NULL OR anulada = FALSE)", ttl=0)
     if not df_ventas_todas.empty:
         df_ventas_todas["fecha_sola"] = pd.to_datetime(df_ventas_todas["fecha_hora"]).dt.strftime("%Y-%m-%d")
@@ -984,13 +983,16 @@ elif menu == "Registrar Venta (POS)":
             total_original = df_carrito["subtotal"].sum()
             st.write(f"Subtotal de productos sin descuento: **S/ {total_original:,.5f}**")
             st.subheader("🏷️ Ajuste de Precio / Descuento")
+            
+            # Ajuste principal: se cambió min_value a 0.0 para permitir un total de 0
             total_venta = st.number_input(
                 "Total Final a Cobrar al Cliente (S/):", 
-                min_value=0.01, 
-                value=max(0.01, float(total_original)), 
+                min_value=0.0, 
+                value=float(total_original), 
                 step=0.00001, 
                 format="%.5f"
             )
+            
             st.subheader("💳 Modalidad de Pago")
             metodo_pago = st.selectbox("Forma principal / Tipo", ["Efectivo", "Yape / Plin", "Mixto (Yape/Plin + Efectivo)", "Tarjeta"])
             monto_yape = 0.0
@@ -1053,7 +1055,7 @@ elif menu == "Registrar Venta (POS)":
                     st.rerun()
 
 # -------------------------------------------------------------
-# 14. HISTORIAL DE VENTAS (INCLUYE OPCIÓN DE ANULAR BOLETA)
+# 14. HISTORIAL DE VENTAS
 # -------------------------------------------------------------
 elif menu == "Historial de Ventas":
     st.header("📊 Historial de Ventas y Anulación de Boletas")
