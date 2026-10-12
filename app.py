@@ -330,7 +330,7 @@ elif menu == "Modificar Datos del Producto":
                         except Exception as e:
                             st.error(f"❌ Error al actualizar: {e}")
                     else:
-                        st.warning("El código y el nombre no pueden estar vacíos.")
+                        st.warning("El código y el nombre não pueden estar vacíos.")
 
 # -------------------------------------------------------------
 # 5. PRODUCTOS FALTANTES
@@ -943,7 +943,7 @@ elif menu == "Registrar Venta (POS)":
     st.header("🛒 Caja / Punto de Venta")
     conn = conectar_db()
     filtro_pos = st.text_input("🔍 Escribe para filtrar producto (ej: 'cemento', 'clavo'):")
-    query_pos = "SELECT id, codigo_interno, nombre, stock, precio_venta, unidad_medida FROM productos"
+    query_pos = "SELECT id, codigo_interno, nombre, stock, precio_venta, precio_compra, unidad_medida FROM productos"
     if filtro_pos:
         query_pos += f" WHERE nombre ILIKE '%{filtro_pos}%' OR codigo_interno ILIKE '%{filtro_pos}%'"
     df_productos = conn.query(query_pos, ttl=0)
@@ -953,7 +953,7 @@ elif menu == "Registrar Venta (POS)":
         if "carrito" not in st.session_state:
             st.session_state.carrito = []
         df_productos["opcion_pos"] = (
-            df_productos["nombre"] + " ➡️ [Unidad: " + df_productos["unidad_medida"] + "] | Stock: " + df_productos["stock"].map('{:,.5f}'.format) + " | S/ " + df_productos["precio_venta"].map('{:,.5f}'.format)
+            df_productos["nombre"] + " ➡️ [Unidad: " + df_productos["unidad_medida"] + "] | Stock: " + df_productos["stock"].map('{:,.5f}'.format) + " | Venta: S/ " + df_productos["precio_venta"].map('{:,.5f}'.format) + " | Costo: S/ " + df_productos["precio_compra"].map('{:,.5f}'.format)
         )
         col_select, col_cant = st.columns([3, 1])
         with col_select:
@@ -967,24 +967,24 @@ elif menu == "Registrar Venta (POS)":
             p_nombre = df_productos.loc[idx_sel, "nombre"]
             p_stock = df_productos.loc[idx_sel, "stock"]
             p_precio = df_productos.loc[idx_sel, "precio_venta"]
+            p_costo = df_productos.loc[idx_sel, "precio_compra"]
             
             if cantidad_vender > p_stock:
                 st.warning(f"⚠️ Stock insuficiente ({p_stock:,.5f} {unidad_sel} disponibles). Se agregará al carrito y el stock quedará en 0.")
             
             st.session_state.carrito.append({
                 "id": int(p_id), "nombre": p_nombre, "cantidad": float(cantidad_vender),
-                "precio": float(p_precio), "subtotal": float(cantidad_vender * p_precio),
+                "precio": float(p_precio), "costo": float(p_costo), "subtotal": float(cantidad_vender * p_precio),
             })
             st.success(f"Agregado: {p_nombre} ({cantidad_vender:,.5f} {unidad_sel})")
         if st.session_state.carrito:
             st.subheader("🛍️ Productos en el Ticket Actual")
             df_carrito = pd.DataFrame(st.session_state.carrito)
-            st.dataframe(df_carrito[["nombre", "cantidad", "precio", "subtotal"]], use_container_width=True)
+            st.dataframe(df_carrito[["nombre", "cantidad", "costo", "precio", "subtotal"]], use_container_width=True)
             total_original = df_carrito["subtotal"].sum()
             st.write(f"Subtotal de productos sin descuento: **S/ {total_original:,.5f}**")
             st.subheader("🏷️ Ajuste de Precio / Descuento")
             
-            # Ajuste principal: se cambió min_value a 0.0 para permitir un total de 0
             total_venta = st.number_input(
                 "Total Final a Cobrar al Cliente (S/):", 
                 min_value=0.0, 
@@ -1015,6 +1015,8 @@ elif menu == "Registrar Venta (POS)":
                         fecha_venta = obtener_hora_peru().strftime("%Y-%m-%d %H:%M:%S")
                         with conn.session as s:
                             s.execute(text("ALTER TABLE ventas ADD COLUMN IF NOT EXISTS anulada BOOLEAN DEFAULT FALSE"))
+                            s.execute(text("ALTER TABLE detalle_ventas ADD COLUMN IF NOT EXISTS precio_compra NUMERIC(15,5)"))
+                            
                             res = s.execute(
                                 text("""
                                     INSERT INTO ventas (fecha_hora, total, metodo_pago, monto_yape, monto_efectivo, anulada)
@@ -1030,10 +1032,10 @@ elif menu == "Registrar Venta (POS)":
                                 precio_unitario_proporcional = subtotal_proporcional / item["cantidad"]
                                 s.execute(
                                     text("""
-                                        INSERT INTO detalle_ventas (venta_id, producto_id, cantidad, precio_unitario, subtotal)
-                                        VALUES (:v_id, :p_id, :cant, :p_u, :sub)
+                                        INSERT INTO detalle_ventas (venta_id, producto_id, cantidad, precio_unitario, precio_compra, subtotal)
+                                        VALUES (:v_id, :p_id, :cant, :p_u, :p_c, :sub)
                                     """),
-                                    dict(v_id=int(venta_id), p_id=int(item["id"]), cant=float(item["cantidad"]), p_u=float(precio_unitario_proporcional), sub=float(subtotal_proporcional)),
+                                    dict(v_id=int(venta_id), p_id=int(item["id"]), cant=float(item["cantidad"]), p_u=float(precio_unitario_proporcional), p_c=float(item["costo"]), sub=float(subtotal_proporcional)),
                                 )
                                 s.execute(text("""
                                     UPDATE productos 
@@ -1063,7 +1065,7 @@ elif menu == "Historial de Ventas":
     
     query_historial_completo = """
         SELECT v.id AS n_boleta, v.fecha_hora, p.nombre AS producto, dv.cantidad, 
-               p.unidad_medida, dv.precio_unitario, dv.subtotal, v.metodo_pago, 
+               p.unidad_medida, dv.precio_compra, dv.precio_unitario, dv.subtotal, v.metodo_pago, 
                v.monto_yape, v.monto_efectivo, v.total AS total_boleta,
                COALESCE(v.anulada, FALSE) AS anulada
         FROM detalle_ventas dv
@@ -1164,4 +1166,4 @@ elif menu == "Eliminar Producto":
                     except Exception as e:
                         st.error(f"❌ Error al actualizar el producto: {e}")
                 else:
-                    st.warning("⚠️ Por favor, marca la casilla de confirmación antes de proceder.")
+                    st.warning("⚠️ Por favor, marca la casilla de confirmación antes de proceder.")  
