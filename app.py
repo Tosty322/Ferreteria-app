@@ -330,7 +330,7 @@ elif menu == "Modificar Datos del Producto":
                         except Exception as e:
                             st.error(f"❌ Error al actualizar: {e}")
                     else:
-                        st.warning("El código y el nombre não pueden estar vacíos.")
+                        st.warning("El código y el nombre no pueden estar vacíos.")
 
 # -------------------------------------------------------------
 # 5. PRODUCTOS FALTANTES
@@ -883,12 +883,12 @@ elif menu == "Historial de Compras":
         )
 
 # -------------------------------------------------------------
-# 11. ACTUALIZAR PRECIOS
+# 11. ACTUALIZAR PRECIOS Y COSTOS
 # -------------------------------------------------------------
 elif menu == "Actualizar Precios":
-    st.header("🔄 Actualizar Precios Independiente")
+    st.header("🔄 Actualizar Precios y Costos Independiente")
     conn = conectar_db()
-    df_productos = conn.query("SELECT id, codigo_interno, nombre, precio_venta FROM productos", ttl=0)
+    df_productos = conn.query("SELECT id, codigo_interno, nombre, precio_venta, precio_compra FROM productos", ttl=0)
     if df_productos.empty:
         st.info("No hay productos para actualizar.")
     else:
@@ -898,25 +898,34 @@ elif menu == "Actualizar Precios":
             idx = df_productos[df_productos["opcion_combo"] == producto_seleccionado].index[0]
             prod_id = df_productos.loc[idx, "id"]
             precio_actual = df_productos.loc[idx, "precio_venta"]
+            costo_actual = df_productos.loc[idx, "precio_compra"]
+            
+            st.write(f"**Precio de compra (Costo) actual:** S/ {costo_actual:,.5f}")
             st.write(f"**Precio de venta actual:** S/ {precio_actual:,.5f}")
-            nuevo_precio = st.number_input("Nuevo Precio de Venta (S/)", min_value=0.0, value=float(precio_actual), step=0.00001, format="%.5f")
-            if st.button("Guardar Nuevo Precio"):
-                if nuevo_precio != precio_actual:
+            
+            with st.form("form_actualizar_precios_costos"):
+                nuevo_costo = st.number_input("Nuevo Precio de Compra / Costo (S/)", min_value=0.0, value=float(costo_actual) if pd.notna(costo_actual) else 0.0, step=0.00001, format="%.5f")
+                nuevo_precio = st.number_input("Nuevo Precio de Venta (S/)", min_value=0.0, value=float(precio_actual), step=0.00001, format="%.5f")
+                
+                btn_guardar_precios = st.form_submit_button("💾 Guardar Nuevos Precios y Costos")
+                if btn_guardar_precios:
                     fecha_ahora = obtener_hora_peru().strftime("%Y-%m-%d %H:%M:%S")
                     with conn.session as s:
                         s.execute(
-                            text("""
-                                INSERT INTO historial_precios (producto_id, precio_anterior, precio_nuevo, fecha_cambio)
-                                VALUES (:p_id, :p_ant, :p_nue, :f_h)
-                            """),
-                            dict(p_id=int(prod_id), p_ant=float(precio_actual), p_nue=float(nuevo_precio), f_h=fecha_ahora),
+                            text("UPDATE productos SET precio_compra = :n_c, precio_venta = :n_p WHERE id = :p_id"),
+                            dict(n_c=float(nuevo_costo), n_p=float(nuevo_precio), p_id=int(prod_id))
                         )
-                        s.execute(text("UPDATE productos SET precio_venta = :n_p WHERE id = :p_id"), dict(n_p=float(nuevo_precio), p_id=int(prod_id)))
+                        if nuevo_precio != precio_actual:
+                            s.execute(
+                                text("""
+                                    INSERT INTO historial_precios (producto_id, precio_anterior, precio_nuevo, fecha_cambio)
+                                    VALUES (:p_id, :p_ant, :p_nue, :f_h)
+                                """),
+                                dict(p_id=int(prod_id), p_ant=float(precio_actual), p_nue=float(nuevo_precio), f_h=fecha_ahora),
+                            )
                         s.commit()
-                    st.success("¡Precio actualizado y registrado en el historial!")
+                    st.success("✅ ¡Precios y costos actualizados correctamente sin alterar el stock!")
                     st.rerun()
-                else:
-                    st.info("El nuevo precio es idéntico al actual.")
 
 # -------------------------------------------------------------
 # 12. HISTORIAL DE PRECIOS
@@ -1166,4 +1175,4 @@ elif menu == "Eliminar Producto":
                     except Exception as e:
                         st.error(f"❌ Error al actualizar el producto: {e}")
                 else:
-                    st.warning("⚠️ Por favor, marca la casilla de confirmación antes de proceder.")  
+                    st.warning("⚠️ Por favor, marca la casilla de confirmación antes de proceder.")
