@@ -18,7 +18,7 @@ st.title("🛠️ Sistema de Control y Ventas - Ferretería")
 # Listas globales de categorías
 CATEGORIAS_DISPONIBLES = [
     "Gasfitería", "Electricidad", "Construcción", "Herramientas",
-    "Pinturas", "Plásticos", "Limpieza", "Iluminación", "Otros",
+    "Pinturas", "Plásticos", "Limpieza", "Iluminación","Cerrajería", "Otros",
 ]
 
 CATEGORIAS_GASTOS = [
